@@ -2,7 +2,14 @@
 
 ## 当前状态
 
-本项目已完成基础工程初始化，并实现了本地 Ollama 的最小普通文本对话 adapter。当前能力仅覆盖：应用代码 → `OllamaClient` → Ollama `/api/chat` → 统一非流式文本响应。
+项目当前处于“统一 Provider 配置与基础 Provider/Tool 构件”阶段。现有源码包括：
+
+- 基于 Pydantic 的 `ProviderConfig`；
+- 从根目录 `.env` 和进程环境变量加载 Provider 配置的函数；
+- OpenAI-compatible 与 Anthropic-compatible Provider 适配器源码；
+- 通用消息模型、工具抽象、工具注册表和内建工具发现基础设施。
+
+本阶段没有可交付的 Agent Runtime、自动对话循环、具体内建工具、设备控制、ROS 2 或硬件适配。Provider 的真实服务联调也不会在默认测试中执行。
 
 ## 目录结构
 
@@ -10,85 +17,83 @@
 robot-agent/
 ├── AGENTS.md
 ├── README.md
-├── .gitignore
-├── .python-version
 ├── .env.example
 ├── pyproject.toml
 ├── src/
-│   ├── __init__.py
-│   ├── llm/
+│   ├── config/
 │   │   ├── __init__.py
+│   │   ├── loader.py
+│   │   └── schema.py
+│   ├── providers/
 │   │   ├── base.py
-│   │   └── ollama.py
-│   └── messages/
-│       ├── __init__.py
-│       └── message.py
-├── docs/
-│   ├── README.md
-│   └── development-progress.md
+│   │   ├── factory.py
+│   │   ├── messages.py
+│   │   ├── openai_compat_provider.py
+│   │   └── anthropic_compat_provider.py
+│   └── tools/
+│       ├── base.py
+│       ├── context.py
+│       ├── loader.py
+│       ├── registry.py
+│       └── builtin/
 └── tests/
-    ├── __init__.py
-    └── llm/
-        └── test_ollama.py
+    └── config/
+        └── test_loader.py
 ```
 
-`robot-agent` 是项目/发行名称，`src` 是 Python 导入包名。当前 `src.llm.ollama.OllamaClient` 是唯一依赖官方 Ollama SDK 的 adapter；`src.llm.base` 与 `src.messages.message` 保持 provider-independent。`src.messages` 仅重导出消息类型，实际定义位于 `src.messages.message`。
+`robot-agent` 是项目/发行名称，`src` 是 Python 导入包名。当前打包配置包含 `src.config`、`src.providers`、`src.tools` 和 `src.tools.builtin`。
 
 ## Python 与 uv
 
-项目支持 Python 3.10（含）至 3.13（不含），并通过 `uv` 管理依赖和虚拟环境。首次准备开发环境时可运行：
+项目支持 Python 3.10（含）至 3.13（不含），并通过 `uv` 管理依赖和虚拟环境。
 
 ```powershell
 uv sync
-```
-
-常用检查命令：
-
-```powershell
 uv run pytest
 uv run ruff check .
 uv run ruff format --check .
 ```
 
-开发依赖仅用于测试和代码质量检查；运行时依赖只服务于本阶段的本地 Ollama 普通文本对话，不包含 Agent、设备或其他业务框架。依赖同步会根据工具行为生成或更新锁文件，因此应在需要建立本地开发环境时再执行。
+运行时依赖包括：
 
-运行时依赖仅包含官方 `ollama` SDK 和用于加载根目录 `.env` 的 `python-dotenv`。`.env` 是本机配置文件，不会提交；可参考已提交的 `.env.example` 创建或恢复它。
+- `openai`：OpenAI-compatible Provider；
+- `anthropic`：Anthropic-compatible Provider；
+- `pydantic`：Provider 配置校验；
+- `python-dotenv`：根目录 `.env` 加载。
 
-## 本地 Ollama 文本对话
+Ruff 的项目行长规则为 100 个字符。`.env` 是本机配置文件，已被 Git 忽略；只能提交 `.env.example`，不能提交密钥或个人端点配置。
 
-根目录 `.env` 集中保存以下本地配置：
+## 统一 Provider 配置
+
+根目录 `.env` 使用项目级 `PROVIDER_*` 变量，而非特定模型服务的变量：
 
 ```dotenv
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-OLLAMA_MODEL=qwen3.5:4b
-OLLAMA_TIMEOUT=60
-OLLAMA_STREAM=false
-OLLAMA_THINK=false
+PROVIDER_TYPE=openai_compat
+PROVIDER_API_KEY=
+PROVIDER_API_BASE=https://api.openai.com/v1
+PROVIDER_MODEL=your-model-name
+PROVIDER_MAX_TOKENS=1024
+PROVIDER_TEMPERATURE=0.7
 ```
 
-进程环境变量优先于 `.env`。也可以直接构造 `OllamaConfig` 传给 `OllamaClient`，以显式参数覆盖配置。当前 adapter 固定使用 `stream=false`；若配置为 `true`，会返回结构化的“暂不支持流式”错误而不会发出请求。
+支持的 `PROVIDER_TYPE` 为：
 
-普通调用接收 `Message` 列表并异步返回统一 `ModelResponse`。响应包含文本、结束原因、可选 thinking、可选 usage、归一化原始响应以及结构化错误；服务不可达、超时、HTTP 错误和无效响应不会泄漏 SDK 类型或完整 Prompt。请求取消会原样传播给调用方。
+- `openai_compat`
+- `anthropic_compat`
 
-## 开发规范概述
+调用 `src.config.load_provider_config()` 时才会读取 `.env`；已存在的进程环境变量优先于 `.env` 值。环境变量会被映射为 `ProviderConfig` 的 `type`、`api_key`、`api_base`、`default_model`、`default_max_tokens` 与 `default_temperature`。数值转换和非法配置由 Pydantic 负责。
 
-详细规范位于 [AGENTS.md](AGENTS.md)。开发时应先阅读相关文件，保持实现简单、职责清晰且可测试；不引入当前不需要的依赖，也不为假设中的未来需求提前搭建复杂架构。
+对于不需要凭据的本地兼容端点，`PROVIDER_API_KEY` 可以留空；托管服务通常需要由本机用户填写真实 API Key。应用不得记录或输出该值。
 
-## 测试
+## 测试与文档
 
-`tests/` 用于存放自动化测试。新增功能时，应同时新增覆盖其重要行为的独立测试；外部服务和设备应使用 Mock 或 Fake 隔离。
+默认测试只覆盖离线配置加载行为，不连接 Provider 服务、网络、GPU 或设备。当前开发进度记录在 [docs/development-progress.md](docs/development-progress.md)。
 
-## 文档
+后续开发必须遵守 [AGENTS.md](AGENTS.md)：先阅读相关文件，保持职责清晰，避免不必要抽象，并使代码、配置、测试和文档保持一致。
 
-`docs/` 用于存放项目文档。当前开发进度请见 [docs/development-progress.md](docs/development-progress.md)；未来可在需求明确后逐步添加设计、接口、开发和运行相关文档。
+## 当前未实现或未验证内容
 
-## 后续开发原则
-
-- 只实现已确认范围内的能力。
-- 代码、配置与文档同步更新。
-- 清晰区分已实现内容与计划内容。
-- 在引入外部依赖、平台适配或复杂架构前，先确认实际需求和边界。
-
-## 当前未实现内容
-
-当前未实现 Tool Calling、Agent Runtime、ReAct、ROS 2、机器人控制、设备或硬件适配、多模态能力、外部系统连接、通信协议、数据库存储与服务启动脚本。除最小 Ollama 普通文本对话外，不应将其他计划能力视为已完成。
+- Provider 的真实服务联调与端到端集成测试；
+- Agent Runtime、自动规划或自动工具调用循环；
+- 具体内建工具、设备控制、ROS 2 和硬件适配；
+- 会话存储、外部系统连接、通信协议和服务启动入口。

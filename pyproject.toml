@@ -5,11 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "robot-agent"
 version = "0.1.0"
-description = "Minimal local Ollama text chat adapter for robot-agent."
+description = "Configurable OpenAI- and Anthropic-compatible LLM provider layer."
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 dependencies = [
-    "ollama>=0.6.2",
+    "anthropic>=1.4.0",
+    "openai>=3.11.0",
+    "pydantic>=2.9",
     "python-dotenv>=1.2.3",
 ]
 
@@ -21,7 +23,7 @@ dev = [
 
 [tool.setuptools]
 package-dir = {src = "src"}
-packages = ["src", "src.llm", "src.messages"]
+packages = ["src", "src.config", "src.providers", "src.tools", "src.tools.builtin"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -30,7 +32,7 @@ addopts = "-ra"
 
 [tool.ruff]
 target-version = "py310"
-line-length = 88
+line-length = 100
 src = ["src", "tests"]
 
 [tool.ruff.lint]
