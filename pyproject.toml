@@ -5,10 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "robot-agent"
 version = "0.1.0"
-description = "Python project foundation for robot-agent."
+description = "Minimal local Ollama text chat adapter for robot-agent."
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
-dependencies = []
+dependencies = [
+    "ollama>=0.6.2",
+    "python-dotenv>=1.2.3",
+]
 
 [dependency-groups]
 dev = [
@@ -18,7 +21,7 @@ dev = [
 
 [tool.setuptools]
 package-dir = {src = "src"}
-packages = ["src"]
+packages = ["src", "src.llm", "src.messages"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
