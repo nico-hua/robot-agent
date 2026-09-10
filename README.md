@@ -6,7 +6,7 @@
 
 - 基于 Pydantic 的 `ProviderConfig`；
 - 从根目录 `.env` 和进程环境变量加载 Provider 配置的函数；
-- OpenAI-compatible 与 Anthropic-compatible Provider 适配器源码；
+- OpenAI-compatible Provider 适配器源码；
 - 通用消息模型、工具抽象、工具注册表和内建工具发现基础设施。
 
 本阶段没有可交付的 Agent Runtime、自动对话循环、具体内建工具、设备控制、ROS 2 或硬件适配。Provider 的真实服务联调也不会在默认测试中执行。
@@ -29,7 +29,6 @@ robot-agent/
 │   │   ├── factory.py
 │   │   ├── messages.py
 │   │   ├── openai_compat_provider.py
-│   │   └── anthropic_compat_provider.py
 │   └── tools/
 │       ├── base.py
 │       ├── context.py
@@ -37,8 +36,14 @@ robot-agent/
 │       ├── registry.py
 │       └── builtin/
 └── tests/
-    └── config/
-        └── test_loader.py
+    ├── config/
+    │   └── test_loader.py
+    ├── providers/
+    │   └── test_factory.py
+    └── tools/
+        ├── test_base.py
+        ├── test_tool_loader.py
+        └── test_registry.py
 ```
 
 `robot-agent` 是项目/发行名称，`src` 是 Python 导入包名。当前打包配置包含 `src.config`、`src.providers`、`src.tools` 和 `src.tools.builtin`。
@@ -57,7 +62,6 @@ uv run ruff format --check .
 运行时依赖包括：
 
 - `openai`：OpenAI-compatible Provider；
-- `anthropic`：Anthropic-compatible Provider；
 - `pydantic`：Provider 配置校验；
 - `python-dotenv`：根目录 `.env` 加载。
 
@@ -76,10 +80,9 @@ PROVIDER_MAX_TOKENS=1024
 PROVIDER_TEMPERATURE=0.7
 ```
 
-支持的 `PROVIDER_TYPE` 为：
+当前支持的 `PROVIDER_TYPE` 为：
 
 - `openai_compat`
-- `anthropic_compat`
 
 调用 `src.config.load_provider_config()` 时才会读取 `.env`；已存在的进程环境变量优先于 `.env` 值。环境变量会被映射为 `ProviderConfig` 的 `type`、`api_key`、`api_base`、`default_model`、`default_max_tokens` 与 `default_temperature`。数值转换和非法配置由 Pydantic 负责。
 
@@ -87,7 +90,7 @@ PROVIDER_TEMPERATURE=0.7
 
 ## 测试与文档
 
-默认测试只覆盖离线配置加载行为，不连接 Provider 服务、网络、GPU 或设备。当前开发进度记录在 [docs/development-progress.md](docs/development-progress.md)。
+默认测试覆盖离线配置加载、Provider 工厂构造和 Tool 基础设施行为，不连接 Provider 服务、网络、GPU 或设备。当前开发进度记录在 [docs/development-progress.md](docs/development-progress.md)。
 
 后续开发必须遵守 [AGENTS.md](AGENTS.md)：先阅读相关文件，保持职责清晰，避免不必要抽象，并使代码、配置、测试和文档保持一致。
 

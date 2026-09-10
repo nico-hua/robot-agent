@@ -43,7 +43,7 @@ def test_load_provider_config_uses_process_environment_over_dotenv(
     env_file.write_text(
         "\n".join(
             [
-                "PROVIDER_TYPE=anthropic_compat",
+                "PROVIDER_TYPE=openai_compat",
                 "PROVIDER_API_KEY=dotenv-key",
                 "PROVIDER_API_BASE=https://api.example.test",
                 "PROVIDER_MODEL=dotenv-model",
@@ -60,7 +60,7 @@ def test_load_provider_config_uses_process_environment_over_dotenv(
 
     config = load_provider_config()
 
-    assert config.type == "anthropic_compat"
+    assert config.type == "openai_compat"
     assert config.default_model == "process-model"
     assert config.default_max_tokens == 1024
     assert "PROVIDER_TYPE" not in os.environ
@@ -70,6 +70,11 @@ def test_load_provider_config_treats_blank_api_key_as_optional() -> None:
     config = load_provider_config(_provider_environment(PROVIDER_API_KEY=""))
 
     assert config.api_key == ""
+
+
+def test_load_provider_config_rejects_unsupported_provider_type() -> None:
+    with pytest.raises(ValidationError):
+        load_provider_config(_provider_environment(PROVIDER_TYPE="unsupported_compat"))
 
 
 def test_load_provider_config_reports_missing_required_values() -> None:

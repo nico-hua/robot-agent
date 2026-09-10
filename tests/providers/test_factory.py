@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-import src.providers.anthropic_compat_provider as anthropic_compat_provider
 import src.providers.openai_compat_provider as openai_compat_provider
 from src.config.schema import ProviderConfig
 from src.providers.base import LLMProvider
@@ -38,14 +37,6 @@ class _FakeAsyncClient:
             "test-key",
             id="openai-compatible-with-key",
         ),
-        pytest.param(
-            "anthropic_compat",
-            "https://api.example.test",
-            "test-key",
-            anthropic_compat_provider.AnthropicCompatProvider,
-            "test-key",
-            id="anthropic-compatible",
-        ),
     ],
 )
 def test_default_factory_constructs_concrete_provider(
@@ -57,7 +48,6 @@ def test_default_factory_constructs_concrete_provider(
     expected_sdk_api_key: str,
 ) -> None:
     monkeypatch.setattr(openai_compat_provider, "AsyncOpenAI", _FakeAsyncClient)
-    monkeypatch.setattr(anthropic_compat_provider, "AsyncAnthropic", _FakeAsyncClient)
     config = ProviderConfig(
         type=provider_type,
         api_key=api_key,

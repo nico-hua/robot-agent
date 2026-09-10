@@ -120,12 +120,3 @@ class Tool(ABC):
                 "parameters": self.parameters_schema,
             },
         }
-
-    def to_anthropic_tool(self) -> dict[str, Any]:
-        """Return this tool in Anthropic tool-use format."""
-
-        return {
-            "name": self.name,
-            "description": self.description,
-            "input_schema": self.parameters_schema,
-        }

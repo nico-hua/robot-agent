@@ -5,11 +5,10 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "robot-agent"
 version = "0.1.0"
-description = "Configurable OpenAI- and Anthropic-compatible LLM provider layer."
+description = "Configurable OpenAI-compatible LLM provider layer."
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 dependencies = [
-    "anthropic>=1.4.0",
     "openai>=3.11.0",
     "pydantic>=2.9",
     "python-dotenv>=1.2.3",

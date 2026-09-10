@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 
 from ..config.schema import ProviderConfig
-from .anthropic_compat_provider import AnthropicCompatProvider
 from .base import LLMProvider
 from .openai_compat_provider import OpenAICompatProvider
 
@@ -42,17 +41,12 @@ def create_default_provider_factory() -> ProviderFactory:
     return ProviderFactory(
         {
             "openai_compat": _create_openai_compat_provider,
-            "anthropic_compat": _create_anthropic_compat_provider,
         }
     )
 
 
 def _create_openai_compat_provider(config: ProviderConfig) -> LLMProvider:
     return OpenAICompatProvider(**_provider_options(config))
-
-
-def _create_anthropic_compat_provider(config: ProviderConfig) -> LLMProvider:
-    return AnthropicCompatProvider(**_provider_options(config))
 
 
 def _provider_options(config: ProviderConfig) -> dict[str, str | int | float]:

@@ -12,7 +12,7 @@ from pydantic import (
     field_validator,
 )
 
-ProviderType = Literal["openai_compat", "anthropic_compat"]
+ProviderType = Literal["openai_compat"]
 
 
 class ProviderConfig(BaseModel):
