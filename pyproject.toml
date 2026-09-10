@@ -22,7 +22,14 @@ dev = [
 
 [tool.setuptools]
 package-dir = {src = "src"}
-packages = ["src", "src.config", "src.providers", "src.tools", "src.tools.builtin"]
+packages = [
+    "src",
+    "src.agent",
+    "src.config",
+    "src.providers",
+    "src.tools",
+    "src.tools.builtin",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

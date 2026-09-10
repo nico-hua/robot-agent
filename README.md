@@ -9,7 +9,9 @@
 - OpenAI-compatible Provider 适配器源码；
 - 通用消息模型、工具抽象、工具注册表和内建工具发现基础设施。
 
-本阶段没有可交付的 Agent Runtime、自动对话循环、具体内建工具、设备控制、ROS 2 或硬件适配。Provider 的真实服务联调也不会在默认测试中执行。
+当前包含最小、非流式的 `AgentRunner`：它按轮调用 `provider.chat()`，顺序处理模型请求的工具调用，并在得到最终响应或达到最大迭代次数时结束。
+
+尚未实现流式 Agent 执行、目标模式、消息注入、运行时调度、具体内建工具、设备控制、ROS 2 或硬件适配。Provider 的真实服务联调也不会在默认测试中执行。
 
 ## 目录结构
 
@@ -20,6 +22,9 @@ robot-agent/
 ├── .env.example
 ├── pyproject.toml
 ├── src/
+│   ├── agent/
+│   │   ├── __init__.py
+│   │   └── runner.py
 │   ├── config/
 │   │   ├── __init__.py
 │   │   ├── loader.py
@@ -36,6 +41,8 @@ robot-agent/
 │       ├── registry.py
 │       └── builtin/
 └── tests/
+    ├── agent/
+    │   └── test_runner.py
     ├── config/
     │   └── test_loader.py
     ├── providers/
@@ -46,7 +53,7 @@ robot-agent/
         └── test_registry.py
 ```
 
-`robot-agent` 是项目/发行名称，`src` 是 Python 导入包名。当前打包配置包含 `src.config`、`src.providers`、`src.tools` 和 `src.tools.builtin`。
+`robot-agent` 是项目/发行名称，`src` 是 Python 导入包名。当前打包配置包含 `src.agent`、`src.config`、`src.providers`、`src.tools` 和 `src.tools.builtin`。
 
 ## Python 与 uv
 
@@ -90,13 +97,13 @@ PROVIDER_TEMPERATURE=0.7
 
 ## 测试与文档
 
-默认测试覆盖离线配置加载、Provider 工厂构造和 Tool 基础设施行为，不连接 Provider 服务、网络、GPU 或设备。当前开发进度记录在 [docs/development-progress.md](docs/development-progress.md)。
+默认测试覆盖离线配置加载、Provider 工厂构造、Tool 基础设施和非流式 AgentRunner 行为，不连接 Provider 服务、网络、GPU 或设备。当前开发进度记录在 [docs/development-progress.md](docs/development-progress.md)。
 
 后续开发必须遵守 [AGENTS.md](AGENTS.md)：先阅读相关文件，保持职责清晰，避免不必要抽象，并使代码、配置、测试和文档保持一致。
 
 ## 当前未实现或未验证内容
 
 - Provider 的真实服务联调与端到端集成测试；
-- Agent Runtime、自动规划或自动工具调用循环；
+- 流式 Agent 执行、目标模式、消息注入和运行时调度；
 - 具体内建工具、设备控制、ROS 2 和硬件适配；
 - 会话存储、外部系统连接、通信协议和服务启动入口。
