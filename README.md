@@ -2,17 +2,20 @@
 
 ## 当前状态
 
-项目当前处于“统一 Provider 配置与基础 Provider/Tool 构件”阶段。现有源码包括：
+项目当前处于“统一 Provider 配置、基础 Provider/Tool 构件和最小非流式消息循环”阶段。现有源码包括：
 
 - 基于 Pydantic 的 `ProviderConfig`；
 - 从根目录 `.env` 和进程环境变量加载 Provider 配置与本地工作目录的函数；
 - OpenAI-compatible Provider 适配器源码；
 - 通用消息模型、工具抽象、工具注册表和内建工具发现基础设施。
 - 最小持久化会话：仅维护消息历史的 `Session`、JSONL 存储和 `SessionManager`。
+- 内存 `MessageBus`、`ContextBuilder` 和队列式 `AgentLoop`：每条消息均构建临时系统提示词、读取会话历史、执行 `AgentRunner`、持久化结果并发布出站回复。
 
 当前包含最小、非流式的 `AgentRunner`：它按轮调用 `provider.chat()`，顺序处理模型请求的工具调用，并在得到最终响应或达到最大迭代次数时结束。
 
 `Session` 不维护摘要、摘要边界或目标状态；旧 JSONL 会话文件中的这些已移除 Header 字段会在读取时忽略，并在下一次保存时移除。
+
+`MessageBus` 的入站队列会被 `AgentLoop` 连续消费，每条消息由受追踪、可取消的后台任务处理；不同会话可并行处理，同一 `session_id` 从读取历史到保存结果始终串行化。每次请求只向 Provider 发送一个临时系统消息；它不会写入 Session。只要 `AgentRunner` 正常返回 `AgentRunResult`，会话历史、当前用户消息和本轮新增的 Assistant/Tool 消息就会按顺序持久化，即使最终回复为空或达到最大迭代边界。Provider 或 AgentRunner 抛出异常时，循环只发布不含内部细节的失败回复，不写入 Session。
 
 尚未实现流式 Agent 执行、目标模式、消息注入、运行时调度、具体内建工具、设备控制、ROS 2 或硬件适配。Provider 的真实服务联调也不会在默认测试中执行。
 
@@ -27,7 +30,13 @@ robot-agent/
 ├── src/
 │   ├── agent/
 │   │   ├── __init__.py
+│   │   ├── context.py
+│   │   ├── loop.py
 │   │   └── runner.py
+│   ├── bus/
+│   │   ├── __init__.py
+│   │   ├── message_bus.py
+│   │   └── messages.py
 │   ├── config/
 │   │   ├── __init__.py
 │   │   ├── loader.py
@@ -50,6 +59,8 @@ robot-agent/
 │       └── builtin/
 └── tests/
     ├── agent/
+    │   ├── test_context.py
+    │   ├── test_loop.py
     │   └── test_runner.py
     ├── config/
     │   └── test_loader.py
@@ -63,7 +74,7 @@ robot-agent/
         └── test_registry.py
 ```
 
-`robot-agent` 是项目/发行名称，`src` 是 Python 导入包名。当前打包配置包含 `src.agent`、`src.config`、`src.providers`、`src.session`、`src.tools` 和 `src.tools.builtin`。
+`robot-agent` 是项目/发行名称，`src` 是 Python 导入包名。当前打包配置包含 `src.agent`、`src.bus`、`src.config`、`src.providers`、`src.session`、`src.tools` 和 `src.tools.builtin`。
 
 ## Python 与 uv
 
@@ -110,7 +121,7 @@ PROVIDER_TEMPERATURE=0.7
 
 ## 测试与文档
 
-默认测试覆盖离线配置加载、Provider 工厂构造、Tool 基础设施、非流式 AgentRunner，以及 Session/JSONL 生命周期行为；不连接 Provider 服务、网络、GPU 或设备。当前开发进度记录在 [docs/development-progress.md](docs/development-progress.md)。
+默认测试覆盖离线配置加载、Provider 工厂构造、Tool 基础设施、非流式 AgentRunner、ContextBuilder、MessageBus/AgentLoop 以及 Session/JSONL 生命周期行为；不连接 Provider 服务、网络、GPU 或设备。当前开发进度记录在 [docs/development-progress.md](docs/development-progress.md)。
 
 后续开发必须遵守 [AGENTS.md](AGENTS.md)：先阅读相关文件，保持职责清晰，避免不必要抽象，并使代码、配置、测试和文档保持一致。
 

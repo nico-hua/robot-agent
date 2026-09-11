@@ -2,7 +2,7 @@
 
 ## 当前开发阶段
 
-当前处于“统一 Provider 配置、基础 Provider/Tool 构件、最小非流式 AgentRunner 与最小持久化会话”阶段。项目以 `ProviderConfig` 描述 OpenAI-compatible Provider 的基础连接与模型参数；根目录 `.env` 提供 Provider 和本地工作目录配置。默认测试不连接真实 Provider 服务。
+当前处于“统一 Provider 配置、基础 Provider/Tool 构件、最小非流式 AgentRunner、最小持久化会话与队列式消息循环”阶段。项目以 `ProviderConfig` 描述 OpenAI-compatible Provider 的基础连接与模型参数；根目录 `.env` 提供 Provider 和本地工作目录配置。默认测试不连接真实 Provider 服务。
 
 ## 已完成功能
 
@@ -25,6 +25,7 @@
 ### 2026-09-11
 
 - 新增项目级 `WORKSPACE_PATH` 本地配置：`load_workspace_path()` 与 Provider 配置使用相同的 `.env`/进程环境变量优先级；未传入路径的 `SessionManager()` 使用该配置。仓库根目录 `workspace/` 已被 Git 忽略，默认测试覆盖路径加载、优先级、空值校验和 Manager 回退行为。
+- 新增最小 `MessageBus`、`ContextBuilder` 和队列式 `AgentLoop`：主循环持续消费入站队列，并为每条消息创建受追踪、可取消的处理任务；不同会话可并行处理，同一 `session_id` 从读取历史到保存结果使用锁保持顺序。每条入站消息按“系统提示词 + 非系统历史 + 当前用户消息”构建请求，交由非流式 `AgentRunner` 执行，再保存本轮新增消息并发布出站回复。系统提示词不写入 Session；仅在 `AgentRunner` 正常返回 `AgentRunResult` 后保存本轮新增消息，Provider 或 Runner 异常只发布不泄露内部细节的失败回复。新增离线 Context 与 Loop 测试。
 
 ## 待开发功能
 
@@ -43,4 +44,4 @@
 ## 待解决问题
 
 - 本地 `.env` 中必须由用户填写与所选 Provider 匹配的 API Base、模型名，以及托管服务所需的 API Key。
-- 当前默认测试验证配置加载、Provider 工厂构造、Tool 基础设施、非流式 AgentRunner 与 Session 持久化生命周期；不会验证凭据有效性、模型可用性或实际网络连接。
+- 当前默认测试验证配置加载、Provider 工厂构造、Tool 基础设施、非流式 AgentRunner、ContextBuilder、MessageBus/AgentLoop 与 Session 持久化生命周期；不会验证凭据有效性、模型可用性或实际网络连接。

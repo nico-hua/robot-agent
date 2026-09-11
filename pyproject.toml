@@ -25,6 +25,7 @@ package-dir = {src = "src"}
 packages = [
     "src",
     "src.agent",
+    "src.bus",
     "src.config",
     "src.providers",
     "src.session",
