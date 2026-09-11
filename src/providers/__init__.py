@@ -15,6 +15,7 @@ from .messages import (
     ToolCallRequest,
     ToolMessage,
 )
+from .ollama_compact_provider import OllamaCompactProvider
 from .openai_compat_provider import OpenAICompatProvider
 
 __all__ = [
@@ -25,6 +26,7 @@ __all__ = [
     "LLMResponse",
     "Message",
     "MessageRole",
+    "OllamaCompactProvider",
     "OpenAICompatProvider",
     "ProviderError",
     "ProviderFactory",

@@ -27,13 +27,18 @@ class OpenAICompatProvider(LLMProvider):
         default_model: str,
         default_max_tokens: int | None = None,
         default_temperature: float | None = None,
+        timeout: float = 60.0,
         *,
         client: Any | None = None,
     ) -> None:
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
+            raise ValueError("OpenAI-compatible timeout must be a positive number")
+
         self.api_base = api_base
         self.default_model = default_model
         self.default_max_tokens = default_max_tokens
         self.default_temperature = default_temperature
+        self.timeout = float(timeout)
         self._client = (
             client
             if client is not None
@@ -42,6 +47,7 @@ class OpenAICompatProvider(LLMProvider):
                 # OpenAI-compatible endpoints that do not authenticate.
                 api_key=api_key or _EMPTY_API_KEY_PLACEHOLDER,
                 base_url=api_base,
+                timeout=self.timeout,
             )
         )
 
@@ -169,6 +175,10 @@ def _message_to_dict(message: BaseMessage) -> dict[str, Any]:
             for tool_call in message.tool_calls
         ]
     elif isinstance(message, ToolMessage):
+        if message.image_path is not None:
+            raise ProviderError(
+                "OpenAI-compatible provider does not support ToolMessage image paths"
+            )
         result["tool_call_id"] = message.tool_call_id
     return result
 

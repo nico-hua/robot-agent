@@ -12,6 +12,8 @@ from src.config import AgentConfig, ApiConfig, ProviderConfig
 from src.providers import BaseMessage, LLMProvider, LLMResponse
 from src.session import SessionManager
 from src.tools import Tool
+from src.tools.builtin.capture_camera import CaptureCameraTool
+from src.tools.registry import ToolRegistry
 
 
 class _StaticProvider(LLMProvider):
@@ -143,3 +145,26 @@ def test_application_does_not_start_http_when_agent_loop_fails_immediately(tmp_p
     assert api_service.stop_calls == 1
     assert failing_loop.close_calls == 1
     assert application.agent_task is None
+
+
+def test_application_loads_builtin_capture_camera_tool(tmp_path: Path) -> None:
+    captured: dict[str, ToolRegistry] = {}
+    provider = _StaticProvider()
+    agent_loop = _FailingAgentLoop()
+
+    def create_agent_loop(
+        *dependencies: object,
+    ) -> _FailingAgentLoop:
+        tool_registry = dependencies[2]
+        assert isinstance(tool_registry, ToolRegistry)
+        captured["tool_registry"] = tool_registry
+        return agent_loop
+
+    Application(
+        _agent_config(tmp_path),
+        provider_factory=lambda config: provider,
+        agent_loop_factory=create_agent_loop,
+        api_service_factory=lambda *args: _FakeApiService(),
+    )
+
+    assert isinstance(captured["tool_registry"].get("capture_camera"), CaptureCameraTool)

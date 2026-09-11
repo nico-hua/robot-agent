@@ -13,7 +13,7 @@ from pydantic import (
     field_validator,
 )
 
-ProviderType = Literal["openai_compat"]
+ProviderType = Literal["ollama", "openai_compat"]
 
 
 class ProviderConfig(BaseModel):
@@ -38,6 +38,7 @@ class ProviderConfig(BaseModel):
         le=2,
         validation_alias=AliasChoices("temperature", "default_temperature"),
     )
+    request_timeout_seconds: float = Field(default=60.0, gt=0)
 
     @field_validator("api_base", "default_model")
     @classmethod

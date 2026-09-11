@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 from src.agent.runner import AgentRunner, AgentRunSpec
@@ -56,6 +57,18 @@ class _RecordingTool(Tool):
     async def execute(self, **arguments: Any) -> ToolResult:
         self.calls.append(arguments)
         return ToolResult(content="tool result")
+
+
+class _ImageRecordingTool(_RecordingTool):
+    """Return a tool result that refers to one local image."""
+
+    def __init__(self, image_path: Path) -> None:
+        super().__init__()
+        self._image_path = image_path
+
+    async def execute(self, **arguments: Any) -> ToolResult:
+        self.calls.append(arguments)
+        return ToolResult(content="image result", image_path=self._image_path)
 
 
 def _spec(
@@ -131,7 +144,7 @@ def test_runner_executes_tool_calls_before_the_next_chat_request() -> None:
     assert provider.chat_calls[1] == (
         HumanMessage(content="hello"),
         AIMessage(content="", tool_calls=(tool_call,)),
-        ToolMessage(content="tool result", tool_call_id="call-1"),
+        ToolMessage(content="tool result", tool_call_id="call-1", tool_name="lookup"),
     )
     assert provider.stream_chat_calls == 0
 
@@ -161,6 +174,7 @@ def test_runner_returns_a_tool_error_for_a_blocked_request() -> None:
     assert provider.chat_calls[1][-1].content == (
         "Error: Tool is not available in this agent run: blocked"
     )
+    assert provider.chat_calls[1][-1].tool_name == "blocked"
     assert result.content == "complete"
     assert provider.stream_chat_calls == 0
 
@@ -178,5 +192,30 @@ def test_runner_returns_a_durable_boundary_at_max_iterations() -> None:
     assert result.messages[-1] == ToolMessage(
         content="tool result",
         tool_call_id="call-1",
+        tool_name="lookup",
     )
     assert provider.stream_chat_calls == 0
+
+
+def test_runner_propagates_a_tool_result_image_path_to_the_next_provider_request(
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "tool-result.png"
+    tool_call = ToolCallRequest(id="call-image", name="lookup", arguments={})
+    provider = _FakeProvider(
+        [
+            LLMResponse(tool_calls=(tool_call,)),
+            LLMResponse(content="complete", finish_reason="stop"),
+        ]
+    )
+    tool = _ImageRecordingTool(image_path)
+
+    result = asyncio.run(AgentRunner().run(_spec(provider, ToolRegistry([tool]))))
+
+    assert provider.chat_calls[1][-1] == ToolMessage(
+        content="image result",
+        tool_call_id="call-image",
+        tool_name="lookup",
+        image_path=image_path,
+    )
+    assert result.messages[-2] == provider.chat_calls[1][-1]

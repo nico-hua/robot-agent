@@ -452,7 +452,11 @@ def test_loop_persists_completed_tool_round_after_max_iteration_result(
     assert saved_session.messages == (
         HumanMessage(content="look something up"),
         AIMessage(content="", tool_calls=(tool_call,)),
-        ToolMessage(content="tool result", tool_call_id="call-1"),
+        ToolMessage(
+            content="tool result",
+            tool_call_id="call-1",
+            tool_name="lookup",
+        ),
     )
 
 

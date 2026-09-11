@@ -126,6 +126,7 @@ class AgentRunner:
                                 f"Error: Tool is not available in this agent run: {tool_call.name}"
                             ),
                             tool_call_id=tool_call.id,
+                            tool_name=tool_call.name,
                         )
                     )
                 else:
@@ -138,6 +139,8 @@ class AgentRunner:
                         ToolMessage(
                             content=result.content,
                             tool_call_id=tool_call.id,
+                            tool_name=tool_call.name,
+                            image_path=result.image_path,
                         )
                     )
         # Every tool-call batch above is complete at this point: each assistant

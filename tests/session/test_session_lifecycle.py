@@ -27,7 +27,12 @@ def _session(key: str = "session-key") -> Session:
             SystemMessage(content="system"),
             HumanMessage(content="user"),
             AIMessage(content="assistant", tool_calls=(tool_call,)),
-            ToolMessage(content="tool result", tool_call_id="call-1"),
+            ToolMessage(
+                content="tool result",
+                tool_call_id="call-1",
+                tool_name="lookup",
+                image_path=Path("workspace/tool-output.png"),
+            ),
         ),
     )
 
@@ -60,6 +65,57 @@ def test_storage_round_trips_messages_without_removed_header_fields(tmp_path) ->
         "updated_at": _TIMESTAMP.isoformat(),
     }
     assert storage.load(session.key) == session
+
+
+def test_storage_round_trips_tool_result_name_and_local_image_path(tmp_path: Path) -> None:
+    storage = JsonlSessionStorage(tmp_path)
+    session = _session()
+
+    storage.save(session)
+
+    records = [
+        json.loads(line)
+        for line in next(tmp_path.glob("*.jsonl")).read_text(encoding="utf-8").splitlines()
+    ]
+    assert records[-1] == {
+        "type": "message",
+        "role": "tool",
+        "content": "tool result",
+        "tool_call_id": "call-1",
+        "tool_name": "lookup",
+        "image_path": str(Path("workspace/tool-output.png")),
+    }
+    assert storage.load(session.key) == session
+
+
+def test_storage_reads_legacy_tool_message_without_name_or_image_path(tmp_path: Path) -> None:
+    storage = JsonlSessionStorage(tmp_path)
+    path = storage._path_for("legacy-tool-message")
+    records = (
+        {
+            "type": "session",
+            "key": "legacy-tool-message",
+            "created_at": _TIMESTAMP.isoformat(),
+            "updated_at": _TIMESTAMP.isoformat(),
+        },
+        {
+            "type": "message",
+            "role": "tool",
+            "content": "legacy result",
+            "tool_call_id": "call-legacy",
+        },
+    )
+    path.write_text(
+        "\n".join(json.dumps(record) for record in records) + "\n",
+        encoding="utf-8",
+    )
+
+    assert storage.load("legacy-tool-message") == Session(
+        key="legacy-tool-message",
+        created_at=_TIMESTAMP,
+        updated_at=_TIMESTAMP,
+        messages=(ToolMessage(content="legacy result", tool_call_id="call-legacy"),),
+    )
 
 
 def test_storage_reads_legacy_header_and_strips_removed_fields_on_save(tmp_path) -> None:

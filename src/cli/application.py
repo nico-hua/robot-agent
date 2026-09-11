@@ -21,6 +21,8 @@ from ..config import (
 from ..providers import LLMProvider, create_default_provider_factory
 from ..session import SessionManager
 from ..tools import ToolRegistry
+from ..tools.context import ToolContext
+from ..tools.loader import ToolLoader
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +61,7 @@ class Application:
         self._provider = provider_factory(config.provider)
         self._session_manager = SessionManager(self._workspace)
         self._tool_registry = ToolRegistry()
+        ToolLoader().load(self._tool_registry, ToolContext())
         self._agent_loop = agent_loop_factory(
             AgentRunner(),
             self._provider,

@@ -141,6 +141,10 @@ def _message_to_record(message: BaseMessage) -> dict[str, Any]:
         ]
     elif isinstance(message, ToolMessage):
         record["tool_call_id"] = message.tool_call_id
+        if message.tool_name is not None:
+            record["tool_name"] = message.tool_name
+        if message.image_path is not None:
+            record["image_path"] = str(message.image_path)
     elif not isinstance(message, (SystemMessage, HumanMessage)):
         raise TypeError(f"Unsupported session message type: {type(message).__name__}")
     return record
@@ -182,6 +186,8 @@ def _message_from_record(record: Mapping[str, Any]) -> BaseMessage:
         return ToolMessage(
             content=content,
             tool_call_id=_required_text(record, "tool_call_id"),
+            tool_name=_optional_text(record, "tool_name"),
+            image_path=_optional_path(record, "image_path"),
         )
     raise ValueError(f"Unsupported session message role: {role}")
 
@@ -211,6 +217,22 @@ def _required_string(record: Mapping[str, Any], name: str) -> str:
     if not isinstance(value, str):
         raise TypeError(f"Session record {name} must be a string")
     return value
+
+
+def _optional_text(record: Mapping[str, Any], name: str) -> str | None:
+    value = record.get(name)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise TypeError(f"Session record {name} must be a string")
+    if not value.strip():
+        raise ValueError(f"Session record {name} must be a non-empty string")
+    return value
+
+
+def _optional_path(record: Mapping[str, Any], name: str) -> Path | None:
+    value = _optional_text(record, name)
+    return Path(value) if value is not None else None
 
 
 def _timestamp_from_record(record: Mapping[str, Any], name: str) -> datetime:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal, Self
 
 from .context import ToolContext
@@ -20,6 +21,7 @@ class ToolResult:
     content: str
     success: bool = True
     error: str | None = None
+    image_path: Path | None = None
 
 
 @dataclass(frozen=True)

@@ -18,6 +18,7 @@ _ENVIRONMENT_FIELDS = {
     "PROVIDER_MODEL": "model",
     "PROVIDER_MAX_TOKENS": "max_tokens",
     "PROVIDER_TEMPERATURE": "temperature",
+    "PROVIDER_REQUEST_TIMEOUT_SECONDS": "request_timeout_seconds",
 }
 _API_ENVIRONMENT_FIELDS = {
     "API_HOST": "host",

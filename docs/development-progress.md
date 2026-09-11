@@ -2,7 +2,7 @@
 
 ## 当前开发阶段
 
-当前处于“统一 `AgentConfig`、基础 Provider/Tool 构件、最小非流式 AgentRunner、最小持久化会话、队列式消息循环与本地 HTTP/CLI”阶段。根目录 `.env` 被加载为唯一的 `AgentConfig`，其中包含 Provider、本地工作目录和 HTTP API 子配置。默认测试不连接真实 Provider 服务；HTTP/CLI 的离线测试与 CLI 帮助入口已验证。
+当前处于“统一 `AgentConfig`、基础 Provider/Tool 构件、最小非流式 AgentRunner、最小持久化会话、队列式消息循环与本地 HTTP/CLI”阶段。根目录 `.env` 被加载为唯一的 `AgentConfig`，其中包含 Provider、本地工作目录和 HTTP API 子配置。当前 Provider 层同时包含 OpenAI-compatible 适配器和原生 Ollama 适配器；默认测试不连接真实 Provider 服务、Ollama、GPU 或视觉模型。
 
 ## 已完成功能
 
@@ -30,11 +30,16 @@
 - 重构本地 `HttpApiService`：`POST /v1/messages` 仅发布当前定义的 `InboundMessage(session_id, content, metadata)`，由唯一出站路由任务按私有关联标识等待对应 `OutboundMessage`；旧的 `channel`、`chat_id`、`sender_id` 和认证逻辑均已移除。新增会话查询与 `POST /v1/sessions/clear`；清空操作直接调用 `SessionManager.clear_messages()` 重置并持久化消息历史，不经过 `MessageBus` 或 AgentLoop。
 - 新增最小 `Application`、`robot-agent` 控制台入口和 `python -m src` 入口。应用只使用 `AgentConfig` 装配当前已有的 Provider、SessionManager、ToolRegistry、MessageBus、AgentLoop 和 HTTP 服务；未恢复 Channel、Cron、MCP、Memory、Subagent 或复杂运行时。启动时会先确认 AgentLoop 未立即失败，再开放 HTTP 监听。
 - `aiohttp` 已加入运行时依赖并同步 `uv.lock`。HTTP/CLI 离线测试覆盖请求关联、并发响应、超时、路由关闭、真实 AgentLoop 装配、会话 API、启动失败与 CLI 生命周期；Ruff、`compileall` 与 79 项默认测试均已通过，`python -m src --help` 和已安装的 `robot-agent --help` 已验证。
+- 新增原生 `OllamaCompactProvider`，并通过 `PROVIDER_TYPE=ollama` 纳入统一 `AgentConfig` 和 Provider 工厂。该适配器使用官方 `ollama` SDK，沿用通用 `PROVIDER_API_BASE`、`PROVIDER_MODEL`、`PROVIDER_MAX_TOKENS`、`PROVIDER_TEMPERATURE` 与 `PROVIDER_REQUEST_TIMEOUT_SECONDS` 配置；本地 Ollama 通常不需要 `PROVIDER_API_KEY`。
+- `ToolMessage` 增加可选的单张本地 `image_path`。图片二进制不进入核心消息或会话数据；仅原生 Ollama 适配器会在发送请求前读取该本地文件，并作为一张工具结果图片交给 Ollama SDK。OpenAI-compatible 适配器不支持此字段。离线测试使用 Mock/Fake Ollama Client 和临时图片文件，不运行真实 Ollama、网络、GPU 或设备测试。
+- 本轮新增 Provider、配置、工具结果路径传递与 JSONL 兼容测试；当前全量默认 `pytest` 为 101 项通过，`compileall` 与 Ruff 检查、格式检查均通过。
+- 新增无参数内建 `capture_camera` 工具。它通过 `ToolLoader` 在 `Application` 装配时自动注册，返回固定的本地图片路径 `./workspace/pictures/test.jpg`，以供 Tool → ToolMessage → 原生 Ollama 图片链路使用；当前不读取图片、不连接机器人头部摄像头，也不执行任何硬件控制。
 
 ## 待开发功能
 
 - Provider 生命周期与真实服务端到端集成测试；
-- 具体内建工具及其权限、失败处理和测试；
+- 面向真实 Ollama 视觉模型的端到端联调；
+- 更多具体内建工具及其权限、失败处理和测试；
 - 流式 Agent 执行、目标模式、消息注入、运行时调度和任务编排；
 - ROS 2、机器人控制和硬件适配；
 - 外部系统连接和通信协议。
@@ -44,9 +49,11 @@
 - 在实际 Provider 联调需求明确后，补充超时、重试、观测和错误映射策略。
 - 在 Provider 具体能力确认后，再决定是否需要 Provider 专属配置。
 - 继续为 Provider、Tool 与 AgentRunner 补充独立、无网络的接口测试。
+- 如需扩展多模态能力，先明确多张图片、远程资源和其他 Provider 的消息格式；当前工具结果仅支持单张本地图片路径，且仅原生 Ollama 适配器可发送该图片。
 - 如未来引入第二个传输层或出站消费者，先为 `MessageBus` 设计按订阅者或路由分发的机制；当前 HTTP 服务是唯一的出站消费者。
 
 ## 待解决问题
 
 - 本地 `.env` 中必须由用户填写与所选 Provider 匹配的 API Base、模型名，以及托管服务所需的 API Key。
 - 当前默认测试验证配置加载、Provider 工厂构造、Tool 基础设施、非流式 AgentRunner、ContextBuilder、MessageBus/AgentLoop、HTTP/CLI 与 Session 持久化生命周期；不会验证凭据有效性、模型可用性或实际 Provider 网络连接。
+- 本地 Ollama 服务地址、可用模型和视觉模型能力由使用者自行准备；默认测试不会验证其可访问性或实际图片理解结果。

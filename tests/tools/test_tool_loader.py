@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 import src.tools.loader as tool_loader_module
 from src.tools.base import Tool, ToolResult
+from src.tools.builtin.capture_camera import CaptureCameraTool
 from src.tools.context import ToolContext
 from src.tools.registry import ToolRegistry
 
@@ -141,6 +142,15 @@ def test_tool_loader_rejects_a_builtin_module_without_package_paths(
 
     with pytest.raises(ValueError, match="is not a package"):
         tool_loader_module.ToolLoader()._discover_tool_classes()
+
+
+def test_tool_loader_registers_capture_camera_builtin() -> None:
+    registry = ToolRegistry()
+
+    registered = tool_loader_module.ToolLoader().load(registry, ToolContext())
+
+    assert "capture_camera" in registered
+    assert isinstance(registry.get("capture_camera"), CaptureCameraTool)
 
 
 def test_tool_loader_registers_enabled_tools_and_skips_existing_or_disabled_tools(

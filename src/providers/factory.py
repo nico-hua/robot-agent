@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 
 from ..config.schema import ProviderConfig
 from .base import LLMProvider
+from .ollama_compact_provider import OllamaCompactProvider
 from .openai_compat_provider import OpenAICompatProvider
 
 ProviderConstructor = Callable[[ProviderConfig], LLMProvider]
@@ -40,6 +41,7 @@ def create_default_provider_factory() -> ProviderFactory:
 
     return ProviderFactory(
         {
+            "ollama": _create_ollama_compact_provider,
             "openai_compat": _create_openai_compat_provider,
         }
     )
@@ -49,6 +51,10 @@ def _create_openai_compat_provider(config: ProviderConfig) -> LLMProvider:
     return OpenAICompatProvider(**_provider_options(config))
 
 
+def _create_ollama_compact_provider(config: ProviderConfig) -> LLMProvider:
+    return OllamaCompactProvider(**_ollama_provider_options(config))
+
+
 def _provider_options(config: ProviderConfig) -> dict[str, str | int | float]:
     return {
         "api_key": config.api_key,
@@ -56,4 +62,15 @@ def _provider_options(config: ProviderConfig) -> dict[str, str | int | float]:
         "default_model": config.default_model,
         "default_max_tokens": config.default_max_tokens,
         "default_temperature": config.default_temperature,
+        "timeout": config.request_timeout_seconds,
+    }
+
+
+def _ollama_provider_options(config: ProviderConfig) -> dict[str, str | int | float]:
+    return {
+        "api_base": config.api_base,
+        "default_model": config.default_model,
+        "default_max_tokens": config.default_max_tokens,
+        "default_temperature": config.default_temperature,
+        "timeout": config.request_timeout_seconds,
     }

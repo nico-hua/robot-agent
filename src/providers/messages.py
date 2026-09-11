@@ -5,6 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal
 
 MessageRole = Literal["system", "user", "assistant", "tool"]
@@ -64,9 +65,37 @@ class AIMessage(BaseMessage):
 
 @dataclass(frozen=True)
 class ToolMessage(BaseMessage):
-    """A tool result associated with a previous model tool call."""
+    """A tool result associated with a previous model tool call.
+
+    ``image_path`` intentionally carries one local file reference rather than
+    image bytes. A provider that supports visual tool results reads the file at
+    request time and converts it to that provider's wire representation.
+    """
 
     tool_call_id: str
+    tool_name: str | None = None
+    image_path: Path | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.tool_call_id, str) or not self.tool_call_id.strip():
+            raise ValueError("Tool message tool_call_id must not be empty")
+        if self.tool_name is not None:
+            if not isinstance(self.tool_name, str) or not self.tool_name.strip():
+                raise ValueError("Tool message tool_name must not be blank when provided")
+
+        if self.image_path is None:
+            return
+        if isinstance(self.image_path, Path):
+            return
+        if not isinstance(self.image_path, str):
+            raise TypeError("Tool message image_path must be one local path or None")
+
+        normalized_path = self.image_path.strip()
+        if not normalized_path:
+            raise ValueError("Tool message image_path must not be blank")
+        if "://" in normalized_path:
+            raise ValueError("Tool message image_path must be a local path, not a URL")
+        object.__setattr__(self, "image_path", Path(normalized_path))
 
     @property
     def role(self) -> Literal["tool"]:
