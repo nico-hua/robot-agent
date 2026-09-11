@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
@@ -45,7 +45,33 @@ class SystemMessage(BaseMessage):
 
 @dataclass(frozen=True)
 class HumanMessage(BaseMessage):
-    """A message from the user."""
+    """A message from the user or a transient local image handoff.
+
+    ``image_bytes`` and ``image_media_type`` are only used while a provider
+    prepares one request. They intentionally remain provider-neutral and are
+    never persisted when ``metadata["source"]`` is ``"tool_image"``.
+    """
+
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+    image_bytes: bytes | None = field(default=None, repr=False)
+    image_media_type: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.metadata, Mapping):
+            raise TypeError("Human message metadata must be a mapping")
+        if self.image_bytes is not None:
+            if not isinstance(self.image_bytes, bytes):
+                raise TypeError("Human message image_bytes must be bytes or None")
+            if not self.image_bytes:
+                raise ValueError("Human message image_bytes must not be empty")
+        if self.image_media_type is not None:
+            if not isinstance(self.image_media_type, str) or not self.image_media_type.strip():
+                raise ValueError("Human message image_media_type must be non-empty when provided")
+        if self.image_bytes is None and self.image_media_type is not None:
+            raise ValueError("Human message image_media_type requires image_bytes")
+        if self.image_bytes is not None and self.image_media_type is None:
+            raise ValueError("Human message image_bytes requires image_media_type")
+        object.__setattr__(self, "metadata", dict(self.metadata))
 
     @property
     def role(self) -> Literal["user"]:

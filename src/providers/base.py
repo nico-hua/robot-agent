@@ -36,6 +36,17 @@ class ProviderError(Exception):
 class LLMProvider(ABC):
     """Abstract interface implemented by concrete LLM providers."""
 
+    @property
+    def supports_tool_image_messages(self) -> bool:
+        """Whether the runner should add transient image handoff messages.
+
+        Providers that accept image-bearing user messages can opt in. The
+        default preserves the existing ToolMessage-only behavior for providers
+        such as native Ollama, which already attaches tool images itself.
+        """
+
+        return False
+
     @abstractmethod
     async def chat(
         self,

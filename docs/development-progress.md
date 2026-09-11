@@ -31,9 +31,9 @@
 - 新增最小 `Application`、`robot-agent` 控制台入口和 `python -m src` 入口。应用只使用 `AgentConfig` 装配当前已有的 Provider、SessionManager、ToolRegistry、MessageBus、AgentLoop 和 HTTP 服务；未恢复 Channel、Cron、MCP、Memory、Subagent 或复杂运行时。启动时会先确认 AgentLoop 未立即失败，再开放 HTTP 监听。
 - `aiohttp` 已加入运行时依赖并同步 `uv.lock`。HTTP/CLI 离线测试覆盖直接 AgentLoop 调用、并发请求、超时取消、未处理异常、真实 AgentLoop 装配、会话 API、启动失败与 CLI 生命周期；本次改造后当前全量默认 `pytest` 的 101 项测试、Ruff 检查与格式检查均通过，`python -m src --help` 和已安装的 `robot-agent --help` 已验证。
 - 新增原生 `OllamaCompactProvider`，并通过 `PROVIDER_TYPE=ollama` 纳入统一 `AgentConfig` 和 Provider 工厂。该适配器使用官方 `ollama` SDK，沿用通用 `PROVIDER_API_BASE`、`PROVIDER_MODEL`、`PROVIDER_MAX_TOKENS`、`PROVIDER_TEMPERATURE` 与 `PROVIDER_REQUEST_TIMEOUT_SECONDS` 配置；本地 Ollama 通常不需要 `PROVIDER_API_KEY`。
-- `ToolMessage` 增加可选的单张本地 `image_path`。图片二进制不进入核心消息或会话数据；仅原生 Ollama 适配器会在发送请求前读取该本地文件，并作为一张工具结果图片交给 Ollama SDK。OpenAI-compatible 适配器不支持此字段。离线测试使用 Mock/Fake Ollama Client 和临时图片文件，不运行真实 Ollama、网络、GPU 或设备测试。
-- 本轮新增 Provider、配置、工具结果路径传递与 JSONL 兼容测试；当前全量默认 `pytest` 为 101 项通过，`compileall` 与 Ruff 检查、格式检查均通过。
-- 新增无参数内建 `capture_camera` 工具。它通过 `ToolLoader` 在 `Application` 装配时自动注册，返回固定的本地图片路径 `./workspace/pictures/test.jpg`，以供 Tool → ToolMessage → 原生 Ollama 图片链路使用；当前不读取图片、不连接机器人头部摄像头，也不执行任何硬件控制。
+- `ToolMessage` 支持可选的单张本地 `image_path`。原生 Ollama 适配器仍会在发送请求前读取该文件，并作为工具结果图片交给 Ollama SDK。对支持图片交接的 Provider，`AgentRunner` 会在每次调用 Provider 前仅构造会话副本：初始历史中的 `ToolMessage.image_path` 会在该副本中改为英文过期提示（要求调用 `capture_camera` 获取最新图片），不会修改原始消息或 AgentRunResult；对于当前工具批次，Runner 会先连续加入全部 `ToolMessage`，再在其后为成功读取的图片加入带 `source=tool_image` 标记的临时多模态 `HumanMessage`。OpenAI-compatible 请求把该消息转换为文本和 `data:` 图片 URL；图片读取失败会写入对应 ToolMessage，保留路径并继续流程。JSONL 在保存时过滤临时图片 HumanMessage，仍保留 ToolMessage 的轻量图片路径和工具关联信息。离线测试不运行真实 Provider、Ollama、网络、GPU 或设备。
+- 本轮新增 Provider、Runner、工具结果路径传递与 JSONL 兼容测试；当前全量默认 `pytest` 为 114 项通过，`compileall` 与 Ruff 检查、格式检查均通过。
+- 新增无参数内建 `capture_camera` 工具。它通过 `ToolLoader` 在 `Application` 装配时自动注册，返回固定的本地图片路径 `./workspace/pictures/test.jpg`，以供当前 Tool → ToolMessage 图片结果链路使用；原生 Ollama Provider 直接读取该路径，OpenAI-compatible Provider 通过 AgentRunner 的临时图片消息接收内容。当前工具不读取图片、不连接机器人头部摄像头，也不执行任何硬件控制。
 
 ## 待开发功能
 
@@ -49,7 +49,7 @@
 - 在实际 Provider 联调需求明确后，补充超时、重试、观测和错误映射策略。
 - 在 Provider 具体能力确认后，再决定是否需要 Provider 专属配置。
 - 继续为 Provider、Tool 与 AgentRunner 补充独立、无网络的接口测试。
-- 如需扩展多模态能力，先明确多张图片、远程资源和其他 Provider 的消息格式；当前工具结果仅支持单张本地图片路径，且仅原生 Ollama 适配器可发送该图片。
+- 如需扩展多模态能力，先明确多张图片、远程资源、直接用户图片和其他 Provider 的消息格式；当前仅支持工具结果的一张本地图片，已覆盖原生 Ollama 与 OpenAI-compatible 的运行期图片交接。
 - 如未来新增使用 `MessageBus` 队列入口的传输层，需先定义其出站回复的路由和消费方式；当前 HTTP 服务直接调用 AgentLoop，不消费 MessageBus 队列。
 
 ## 待解决问题

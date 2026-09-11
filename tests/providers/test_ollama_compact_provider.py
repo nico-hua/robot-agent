@@ -19,7 +19,6 @@ from src.providers import (
     ToolMessage,
 )
 from src.providers.ollama_compact_provider import OllamaCompactProvider
-from src.providers.openai_compat_provider import OpenAICompatProvider
 from src.tools.base import Tool, ToolParameter, ToolResult
 
 
@@ -308,29 +307,6 @@ def test_tool_message_accepts_one_local_path_and_rejects_non_paths(tmp_path: Pat
             content="image result",
             tool_call_id="call-1",
             image_path="https://example.test/frame.jpg",
-        )
-
-
-def test_openai_compatible_provider_does_not_silently_drop_tool_image(tmp_path: Path) -> None:
-    provider = OpenAICompatProvider(
-        api_key="test-key",
-        api_base="https://api.example.test/v1",
-        default_model="test-model",
-        client=object(),
-    )
-
-    with pytest.raises(ProviderError, match="does not support"):
-        asyncio.run(
-            provider.chat(
-                (
-                    ToolMessage(
-                        content="image result",
-                        tool_call_id="call-1",
-                        tool_name="capture_frame",
-                        image_path=tmp_path / "frame.jpg",
-                    ),
-                )
-            )
         )
 
 

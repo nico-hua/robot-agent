@@ -71,7 +71,8 @@ robot-agent/
     │   └── test_loader.py
     ├── providers/
     │   ├── test_factory.py
-    │   └── test_ollama_compact_provider.py
+    │   ├── test_ollama_compact_provider.py
+    │   └── test_openai_compat_provider.py
     ├── session/
     │   └── test_session_lifecycle.py
     └── tools/
@@ -144,11 +145,13 @@ PROVIDER_REQUEST_TIMEOUT_SECONDS=60
 
 ### 工具结果图片
 
-`ToolMessage.content` 仍是文本；它额外支持一个可选的 `image_path`，表示工具结果关联的一张本地图片路径。核心消息与会话数据不保存图片二进制数据。仅原生 `OllamaCompactProvider` 会在实际请求前读取该路径所指向的单个本地文件，并通过 Ollama SDK 的图片字段发送；`OpenAICompatProvider` 不支持 `ToolMessage.image_path`，遇到该字段会明确拒绝请求，而不会静默丢弃或转换为 OpenAI-compatible 请求。当前不支持多张图片、远程 URL、直接传入二进制数据或默认测试中的真实 VLM/Ollama 调用。
+`ToolMessage.content` 仍是文本；它额外支持一个可选的 `image_path`，表示工具结果关联的一张本地图片路径。持久化会话不会保存图片二进制数据。对于支持图片交接的 `OpenAICompatProvider`，`AgentRunner` 会先执行并连续加入同一批全部 `ToolMessage`，再为其中成功读取的图片追加临时 `HumanMessage`；该消息的文本会标明 `tool_name` 和 `tool_call_id`，并带有 `metadata["source"] == "tool_image"` 标记及仅运行期使用的图片字节。OpenAI-compatible 请求会把它转换为一个文本部分和一个 `data:` 图片 URL 的多模态 user message。
+
+历史中的 `ToolMessage.image_path` 不会被重新读取或发送：当支持图片交接的 Provider 进入 `AgentRunner.run()` 时，Runner 只为该次 Provider 调用构造会话副本，把初始历史中带图片路径的 ToolMessage 文本替换为英文过期提示，要求模型调用 `capture_camera` 获取最新图片；原始历史消息和 `AgentRunResult` 保持不变。若新图片文件不存在、为空或读取失败，对应 `ToolMessage` 会保留轻量 `image_path` 并追加稳定错误文本，流程继续而不会生成图片 `HumanMessage`。JSONL 在写入前会过滤 `source=tool_image` 的临时消息，但仍会保存原始 `ToolMessage` 的文本、tool call ID、tool name 和图片路径。原生 `OllamaCompactProvider` 继续在请求时直接读取 `ToolMessage.image_path` 并通过 Ollama SDK 图片字段发送。当前仍只支持单张本地图片，不支持远程 URL、直接传入用户图片或默认测试中的真实视觉模型服务调用。
 
 ### 内建 `capture_camera` 工具
 
-`capture_camera` 是无参数的内建工具，会返回 `./workspace/pictures/test.jpg` 作为一张本地工具结果图片路径。应用装配时会通过 `ToolLoader` 自动注册该工具。当前实现不读取文件、不连接相机，也不控制机器人硬件；它仅为现有的 Tool → ToolMessage → 原生 Ollama 图片链路提供约定的本地样例路径。实际由 Ollama Provider 发送图片时，该文件必须存在且可读取。
+`capture_camera` 是无参数的内建工具，会返回 `./workspace/pictures/test.jpg` 作为一张本地工具结果图片路径。应用装配时会通过 `ToolLoader` 自动注册该工具。当前实现不读取文件、不连接相机，也不控制机器人硬件；它仅为当前 Tool → ToolMessage 图片结果链路提供约定的本地样例路径。原生 Ollama Provider 会直接读取该路径，OpenAI-compatible Provider 则通过 AgentRunner 生成的临时图片消息接收内容；实际发送图片时，该文件必须存在且可读取。
 
 仓库根目录的 `workspace/` 用于本地会话数据，已被 Git 忽略，不应提交其中的内容。
 

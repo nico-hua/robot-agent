@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -11,10 +12,11 @@ from openai import AsyncOpenAI
 
 from ..tools import Tool
 from .base import LLMProvider, LLMResponse, ProviderError, TokenUsage
-from .messages import AIMessage, BaseMessage, ToolCallRequest, ToolMessage
+from .messages import AIMessage, BaseMessage, HumanMessage, ToolCallRequest, ToolMessage
 
 logger = logging.getLogger(__name__)
 _EMPTY_API_KEY_PLACEHOLDER = "not-required"
+_TOOL_IMAGE_SOURCE = "tool_image"
 
 
 class OpenAICompatProvider(LLMProvider):
@@ -50,6 +52,12 @@ class OpenAICompatProvider(LLMProvider):
                 timeout=self.timeout,
             )
         )
+
+    @property
+    def supports_tool_image_messages(self) -> bool:
+        """Request transient user-image handoffs after fresh tool results."""
+
+        return True
 
     async def chat(
         self,
@@ -144,7 +152,7 @@ class OpenAICompatProvider(LLMProvider):
     ) -> dict[str, Any]:
         request: dict[str, Any] = {
             "model": self.default_model,
-            "messages": [_message_to_dict(message) for message in messages],
+            "messages": _messages_to_openai(messages),
         }
         if tools is not None:
             request["tools"] = [tool.to_openai_tool() for tool in tools]
@@ -155,6 +163,12 @@ class OpenAICompatProvider(LLMProvider):
         if resolved_temperature is not None:
             request["temperature"] = resolved_temperature
         return request
+
+
+def _messages_to_openai(messages: Sequence[BaseMessage]) -> list[dict[str, Any]]:
+    """Convert a message snapshot for either standard or streaming requests."""
+
+    return [_message_to_dict(message) for message in tuple(messages)]
 
 
 def _message_to_dict(message: BaseMessage) -> dict[str, Any]:
@@ -175,12 +189,33 @@ def _message_to_dict(message: BaseMessage) -> dict[str, Any]:
             for tool_call in message.tool_calls
         ]
     elif isinstance(message, ToolMessage):
-        if message.image_path is not None:
-            raise ProviderError(
-                "OpenAI-compatible provider does not support ToolMessage image paths"
-            )
         result["tool_call_id"] = message.tool_call_id
+    elif isinstance(message, HumanMessage) and _is_tool_image_message(message):
+        result["content"] = _tool_image_content(message)
     return result
+
+
+def _is_tool_image_message(message: HumanMessage) -> bool:
+    return message.metadata.get("source") == _TOOL_IMAGE_SOURCE
+
+
+def _tool_image_content(message: HumanMessage) -> str | list[dict[str, Any]]:
+    """Translate one transient image handoff to OpenAI multimodal content."""
+
+    image_bytes = message.image_bytes
+    image_media_type = message.image_media_type
+    if image_bytes is None or image_media_type is None:
+        return message.content
+    encoded_image = base64.b64encode(image_bytes).decode("ascii")
+    return [
+        {"type": "text", "text": message.content},
+        {
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:{image_media_type};base64,{encoded_image}",
+            },
+        },
+    ]
 
 
 def _response_from_completion(response: Any) -> LLMResponse:

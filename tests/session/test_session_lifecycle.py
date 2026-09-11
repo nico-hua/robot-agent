@@ -88,6 +88,71 @@ def test_storage_round_trips_tool_result_name_and_local_image_path(tmp_path: Pat
     assert storage.load(session.key) == session
 
 
+def test_storage_filters_transient_tool_image_human_messages_but_keeps_tool_result(
+    tmp_path: Path,
+) -> None:
+    storage = JsonlSessionStorage(tmp_path)
+    image_path = Path("workspace/pictures/camera.png")
+    tool_message = ToolMessage(
+        content="Camera image captured.",
+        tool_call_id="call-camera",
+        tool_name="capture_camera",
+        image_path=image_path,
+    )
+    transient_image_message = HumanMessage(
+        content="Image from tool capture_camera for tool call call-camera.",
+        metadata={
+            "source": "tool_image",
+            "tool_name": "capture_camera",
+            "tool_call_id": "call-camera",
+            "image_path": image_path,
+        },
+        image_bytes=b"non-persisted-camera-bytes",
+        image_media_type="image/png",
+    )
+    ordinary_message = HumanMessage(content="Please describe the image.")
+    session = Session(
+        key="tool-image-session",
+        created_at=_TIMESTAMP,
+        updated_at=_TIMESTAMP,
+        messages=(tool_message, transient_image_message, ordinary_message),
+    )
+
+    storage.save(session)
+
+    path = storage._path_for(session.key)
+    serialized = path.read_text(encoding="utf-8")
+    records = [json.loads(line) for line in serialized.splitlines()]
+    assert records == [
+        {
+            "type": "session",
+            "key": "tool-image-session",
+            "created_at": _TIMESTAMP.isoformat(),
+            "updated_at": _TIMESTAMP.isoformat(),
+        },
+        {
+            "type": "message",
+            "role": "tool",
+            "content": "Camera image captured.",
+            "tool_call_id": "call-camera",
+            "tool_name": "capture_camera",
+            "image_path": str(image_path),
+        },
+        {
+            "type": "message",
+            "role": "user",
+            "content": "Please describe the image.",
+        },
+    ]
+    assert "non-persisted-camera-bytes" not in serialized
+    assert storage.load(session.key) == Session(
+        key="tool-image-session",
+        created_at=_TIMESTAMP,
+        updated_at=_TIMESTAMP,
+        messages=(tool_message, ordinary_message),
+    )
+
+
 def test_storage_reads_legacy_tool_message_without_name_or_image_path(tmp_path: Path) -> None:
     storage = JsonlSessionStorage(tmp_path)
     path = storage._path_for("legacy-tool-message")

@@ -21,6 +21,8 @@ from ..providers import (
 )
 from .models import Session, _validate_session_key
 
+_TOOL_IMAGE_SOURCE = "tool_image"
+
 
 class JsonlSessionStorage:
     """Store each complete session in one atomically replaced JSONL file."""
@@ -113,7 +115,11 @@ def _serialize_session(session: Session) -> str:
             "created_at": session.created_at.isoformat(),
             "updated_at": session.updated_at.isoformat(),
         },
-        *(_message_to_record(message) for message in session.messages),
+        *(
+            _message_to_record(message)
+            for message in session.messages
+            if not _is_transient_tool_image_message(message)
+        ),
     ]
     try:
         return "".join(
@@ -148,6 +154,14 @@ def _message_to_record(message: BaseMessage) -> dict[str, Any]:
     elif not isinstance(message, (SystemMessage, HumanMessage)):
         raise TypeError(f"Unsupported session message type: {type(message).__name__}")
     return record
+
+
+def _is_transient_tool_image_message(message: BaseMessage) -> bool:
+    """Keep runtime image bytes out of the durable JSONL conversation."""
+
+    return (
+        isinstance(message, HumanMessage) and message.metadata.get("source") == _TOOL_IMAGE_SOURCE
+    )
 
 
 def _read_records(path: Path) -> list[dict[str, Any]]:
