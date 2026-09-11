@@ -27,9 +27,9 @@
 - 新增项目级 `WORKSPACE_PATH` 本地配置；随后将 Provider、API 与工作目录收敛到根级 `AgentConfig`。`load_agent_config()` 一次读取 `.env`/进程环境变量并构造嵌套 `ProviderConfig`、`ApiConfig` 与 `workspace_path`；未传入路径的 `SessionManager()` 从该根级配置取得工作目录。仓库根目录 `workspace/` 已被 Git 忽略，默认测试覆盖路径加载、优先级、空值校验和 Manager 回退行为。
 - 新增最小 `MessageBus`、`ContextBuilder` 和队列式 `AgentLoop`：主循环持续消费入站队列，并为每条消息创建受追踪、可取消的处理任务；不同会话可并行处理，同一 `session_id` 从读取历史到保存结果使用锁保持顺序。每条入站消息按“系统提示词 + 非系统历史 + 当前用户消息”构建请求，交由非流式 `AgentRunner` 执行，再保存本轮新增消息并发布出站回复。系统提示词不写入 Session；仅在 `AgentRunner` 正常返回 `AgentRunResult` 后保存本轮新增消息，Provider 或 Runner 异常只发布不泄露内部细节的失败回复。新增离线 Context 与 Loop 测试。
 - `ApiConfig` 作为 `AgentConfig.api` 管理 `API_HOST`、`API_PORT` 和 `API_REQUEST_TIMEOUT_SECONDS`，默认仅监听 `127.0.0.1:8000`；`.env.example` 已同步安全示例。
-- 重构本地 `HttpApiService`：`POST /v1/messages` 仅发布当前定义的 `InboundMessage(session_id, content, metadata)`，由唯一出站路由任务按私有关联标识等待对应 `OutboundMessage`；旧的 `channel`、`chat_id`、`sender_id` 和认证逻辑均已移除。新增会话查询与 `POST /v1/sessions/clear`；清空操作直接调用 `SessionManager.clear_messages()` 重置并持久化消息历史，不经过 `MessageBus` 或 AgentLoop。
+- 重构本地 `HttpApiService`：`POST /v1/messages` 构造当前定义的 `InboundMessage(session_id, content, metadata)` 后，直接调用 `AgentLoop._process_inbound()`，不再写入 `MessageBus` 或等待出站路由；HTTP 超时会取消未完成的本轮 Agent 处理，取消的轮次不会写入会话。旧的 `channel`、`chat_id`、`sender_id` 和认证逻辑均已移除。新增会话查询与 `POST /v1/sessions/clear`；清空操作直接调用 `SessionManager.clear_messages()` 重置并持久化消息历史，不经过 `MessageBus` 或 AgentLoop。
 - 新增最小 `Application`、`robot-agent` 控制台入口和 `python -m src` 入口。应用只使用 `AgentConfig` 装配当前已有的 Provider、SessionManager、ToolRegistry、MessageBus、AgentLoop 和 HTTP 服务；未恢复 Channel、Cron、MCP、Memory、Subagent 或复杂运行时。启动时会先确认 AgentLoop 未立即失败，再开放 HTTP 监听。
-- `aiohttp` 已加入运行时依赖并同步 `uv.lock`。HTTP/CLI 离线测试覆盖请求关联、并发响应、超时、路由关闭、真实 AgentLoop 装配、会话 API、启动失败与 CLI 生命周期；Ruff、`compileall` 与 79 项默认测试均已通过，`python -m src --help` 和已安装的 `robot-agent --help` 已验证。
+- `aiohttp` 已加入运行时依赖并同步 `uv.lock`。HTTP/CLI 离线测试覆盖直接 AgentLoop 调用、并发请求、超时取消、未处理异常、真实 AgentLoop 装配、会话 API、启动失败与 CLI 生命周期；本次改造后当前全量默认 `pytest` 的 101 项测试、Ruff 检查与格式检查均通过，`python -m src --help` 和已安装的 `robot-agent --help` 已验证。
 - 新增原生 `OllamaCompactProvider`，并通过 `PROVIDER_TYPE=ollama` 纳入统一 `AgentConfig` 和 Provider 工厂。该适配器使用官方 `ollama` SDK，沿用通用 `PROVIDER_API_BASE`、`PROVIDER_MODEL`、`PROVIDER_MAX_TOKENS`、`PROVIDER_TEMPERATURE` 与 `PROVIDER_REQUEST_TIMEOUT_SECONDS` 配置；本地 Ollama 通常不需要 `PROVIDER_API_KEY`。
 - `ToolMessage` 增加可选的单张本地 `image_path`。图片二进制不进入核心消息或会话数据；仅原生 Ollama 适配器会在发送请求前读取该本地文件，并作为一张工具结果图片交给 Ollama SDK。OpenAI-compatible 适配器不支持此字段。离线测试使用 Mock/Fake Ollama Client 和临时图片文件，不运行真实 Ollama、网络、GPU 或设备测试。
 - 本轮新增 Provider、配置、工具结果路径传递与 JSONL 兼容测试；当前全量默认 `pytest` 为 101 项通过，`compileall` 与 Ruff 检查、格式检查均通过。
@@ -50,7 +50,7 @@
 - 在 Provider 具体能力确认后，再决定是否需要 Provider 专属配置。
 - 继续为 Provider、Tool 与 AgentRunner 补充独立、无网络的接口测试。
 - 如需扩展多模态能力，先明确多张图片、远程资源和其他 Provider 的消息格式；当前工具结果仅支持单张本地图片路径，且仅原生 Ollama 适配器可发送该图片。
-- 如未来引入第二个传输层或出站消费者，先为 `MessageBus` 设计按订阅者或路由分发的机制；当前 HTTP 服务是唯一的出站消费者。
+- 如未来新增使用 `MessageBus` 队列入口的传输层，需先定义其出站回复的路由和消费方式；当前 HTTP 服务直接调用 AgentLoop，不消费 MessageBus 队列。
 
 ## 待解决问题
 

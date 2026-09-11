@@ -10,15 +10,15 @@
 - 通用消息模型、工具抽象、工具注册表和内建工具发现基础设施。
 - 最小持久化会话：仅维护消息历史的 `Session`、JSONL 存储和 `SessionManager`。
 - 内存 `MessageBus`、`ContextBuilder` 和队列式 `AgentLoop`：每条消息均构建临时系统提示词、读取会话历史、执行 `AgentRunner`、持久化结果并发布出站回复。
-- 本地 HTTP/CLI 装配源码：HTTP 请求经由 `MessageBus` 发布 `InboundMessage`，等待关联的 `OutboundMessage`；`Application` 负责装配 AgentLoop、会话、Provider、总线与 HTTP 服务。
+- 本地 HTTP/CLI 装配源码：HTTP 请求直接调用 `AgentLoop._process_inbound()`；`Application` 负责装配 AgentLoop、会话、Provider、总线与 HTTP 服务。
 
 当前包含最小、非流式的 `AgentRunner`：它按轮调用 `provider.chat()`，顺序处理模型请求的工具调用，并在得到最终响应或达到最大迭代次数时结束。
 
 `Session` 不维护摘要、摘要边界或目标状态；旧 JSONL 会话文件中的这些已移除 Header 字段会在读取时忽略，并在下一次保存时移除。
 
-`MessageBus` 的入站队列会被 `AgentLoop` 连续消费，每条消息由受追踪、可取消的后台任务处理；不同会话可并行处理，同一 `session_id` 从读取历史到保存结果始终串行化。每次请求只向 Provider 发送一个临时系统消息；它不会写入 Session。只要 `AgentRunner` 正常返回 `AgentRunResult`，会话历史、当前用户消息和本轮新增的 Assistant/Tool 消息就会按顺序持久化，即使最终回复为空或达到最大迭代边界。Provider 或 AgentRunner 抛出异常时，循环只发布不含内部细节的失败回复，不写入 Session。
+`MessageBus` 的入站队列仍可被 `AgentLoop` 连续消费，每条消息由受追踪、可取消的后台任务处理；不同会话可并行处理，同一 `session_id` 从读取历史到保存结果始终串行化。HTTP 入口直接调用同一 `AgentLoop._process_inbound()` 处理路径，因此也使用相同的会话锁、上下文构建和持久化规则。每次请求只向 Provider 发送一个临时系统消息；它不会写入 Session。只要 `AgentRunner` 正常返回 `AgentRunResult`，会话历史、当前用户消息和本轮新增的 Assistant/Tool 消息就会按顺序持久化，即使最终回复为空或达到最大迭代边界。Provider 或 AgentRunner 抛出异常时，循环只发布不含内部细节的失败回复，不写入 Session。
 
-HTTP 层为每个请求写入私有的关联标识，并由唯一的出站路由任务将 `OutboundMessage` 交回对应等待者，因此并发请求不会互相取走响应。清空会话直接调用 `SessionManager.clear_messages()` 重置并持久化消息历史；它不经过 `MessageBus` 或 AgentLoop。清空后保留会话标识，但持久化消息历史为空。
+HTTP 层为每个请求构造 `InboundMessage` 后直接调用 `AgentLoop._process_inbound()`，不再向 `MessageBus` 写入或等待 `OutboundMessage`。请求超过 `API_REQUEST_TIMEOUT_SECONDS` 时会取消尚未完成的本轮 Agent 处理，该轮消息不会持久化。清空会话直接调用 `SessionManager.clear_messages()` 重置并持久化消息历史；它不经过 `MessageBus` 或 AgentLoop。清空后保留会话标识，但持久化消息历史为空。
 
 尚未实现流式 Agent 执行、目标模式、消息注入、运行时调度、更多具体内建工具、设备控制、ROS 2 或硬件适配。Provider（包括 Ollama）的真实服务联调也不会在默认测试中执行。
 
@@ -152,7 +152,7 @@ PROVIDER_REQUEST_TIMEOUT_SECONDS=60
 
 仓库根目录的 `workspace/` 用于本地会话数据，已被 Git 忽略，不应提交其中的内容。
 
-`API_HOST` 默认值为 `127.0.0.1`，避免在未设置认证和网络边界时默认向局域网暴露服务；`API_PORT` 默认值为 `8000`；`API_REQUEST_TIMEOUT_SECONDS` 是 `/v1/messages` 等待关联 Agent 出站消息的上限，不是 Provider SDK 超时，也不适用于同步的会话清空。`PROVIDER_REQUEST_TIMEOUT_SECONDS` 是 Provider SDK 的单次请求超时，默认值为 `60` 秒。所有字段均遵循“进程环境变量优先于根目录 `.env`”的规则。
+`API_HOST` 默认值为 `127.0.0.1`，避免在未设置认证和网络边界时默认向局域网暴露服务；`API_PORT` 默认值为 `8000`；`API_REQUEST_TIMEOUT_SECONDS` 是 `/v1/messages` 直接执行 Agent 处理的上限，超时会取消未完成的本轮处理；它不是 Provider SDK 超时，也不适用于同步的会话清空。`PROVIDER_REQUEST_TIMEOUT_SECONDS` 是 Provider SDK 的单次请求超时，默认值为 `60` 秒。所有字段均遵循“进程环境变量优先于根目录 `.env`”的规则。
 
 ## 本地 HTTP API 与 CLI
 
@@ -168,16 +168,16 @@ uv run python -m src
 | 方法 | 路径 | 当前源码行为 |
 | --- | --- | --- |
 | `GET` | `/health` | 返回服务健康状态。 |
-| `POST` | `/v1/messages` | 接收 `{ "session_id": "...", "content": "..." }`，发布当前 `InboundMessage` 并等待同一请求对应的 `OutboundMessage`。不再接受或使用 `channel`、`chat_id`、`sender_id`。 |
+| `POST` | `/v1/messages` | 接收 `{ "session_id": "...", "content": "..." }`，直接调用 `AgentLoop._process_inbound()` 并返回其 `OutboundMessage` 内容。超时会取消本轮处理。不再接受或使用 `channel`、`chat_id`、`sender_id`。 |
 | `POST` | `/v1/sessions/clear` | 接收 `{ "session_id": "..." }`，直接通过 `SessionManager` 清空并保存该会话的消息历史，同时保留会话标识。不存在的会话会成为一个空会话。 |
 | `GET` | `/v1/sessions` | 返回已持久化会话摘要。 |
 | `GET` | `/v1/sessions/{session_id}` | 返回单个会话中可见的用户与助手消息。 |
 
-当前 `HttpApiService` 是共享 `MessageBus` 出站队列的唯一消费者；未来接入其他传输层前，需要先将总线扩展为按订阅者或路由分发，不能直接新增第二个全局出站消费者。
+当前 `HttpApiService` 不消费 `MessageBus` 的入站或出站队列；HTTP 请求走直接的 AgentLoop 调用路径。`MessageBus` 保留给 AgentLoop 的队列入口，未来若新增使用该入口的传输层，需一并定义其出站回复的路由和消费方式。
 
 ## 测试与文档
 
-默认测试覆盖统一 Agent 配置加载、Provider 工厂构造、Tool 基础设施、非流式 AgentRunner、ContextBuilder、MessageBus/AgentLoop、HTTP/CLI 以及 Session/JSONL 生命周期行为；Ollama 图片传输使用 Mock/Fake SDK Client 与临时本地文件验证，不连接真实 Provider、网络服务、GPU 或设备。HTTP/CLI 测试只使用 Mock/Fake Provider 和内存总线。当前开发进度记录在 [docs/development-progress.md](docs/development-progress.md)。
+默认测试覆盖统一 Agent 配置加载、Provider 工厂构造、Tool 基础设施、非流式 AgentRunner、ContextBuilder、MessageBus/AgentLoop、HTTP/CLI 以及 Session/JSONL 生命周期行为；Ollama 图片传输使用 Mock/Fake SDK Client 与临时本地文件验证，不连接真实 Provider、网络服务、GPU 或设备。HTTP/CLI 测试只使用 Mock/Fake Provider；HTTP 端到端测试直接调用 AgentLoop，不依赖运行中的 MessageBus 消费任务。当前开发进度记录在 [docs/development-progress.md](docs/development-progress.md)。
 
 后续开发必须遵守 [AGENTS.md](AGENTS.md)：先阅读相关文件，保持职责清晰，避免不必要抽象，并使代码、配置、测试和文档保持一致。
 

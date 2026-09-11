@@ -1,12 +1,12 @@
-"""Offline HTTP API tests using an in-memory MessageBus."""
+"""Offline HTTP API tests that invoke the AgentLoop directly."""
 
 from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Sequence
-from contextlib import suppress
 from pathlib import Path
 
+import pytest
 from aiohttp.test_utils import TestClient, TestServer
 from src.agent.context import ContextBuilder
 from src.agent.loop import AgentLoop
@@ -27,7 +27,7 @@ from src.tools import Tool, ToolRegistry
 
 
 class _StaticProvider(LLMProvider):
-    """Return one offline response while recording the request messages."""
+    """Return one offline response while recording request messages."""
 
     def __init__(self, content: str) -> None:
         self._content = content
@@ -54,19 +54,107 @@ class _StaticProvider(LLMProvider):
         raise AssertionError("The HTTP application uses the non-streaming AgentRunner path")
 
 
+class _GateProvider(LLMProvider):
+    """Block the first request to make same-session serialization observable."""
+
+    def __init__(self) -> None:
+        self.first_request_started = asyncio.Event()
+        self.second_request_started = asyncio.Event()
+        self.release_first_request = asyncio.Event()
+        self.chat_calls: list[tuple[BaseMessage, ...]] = []
+
+    async def chat(
+        self,
+        messages: Sequence[BaseMessage],
+        tools: Sequence[Tool] | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+    ) -> LLMResponse:
+        del tools, max_tokens, temperature
+        request_messages = tuple(messages)
+        self.chat_calls.append(request_messages)
+        current_message = request_messages[-1]
+        assert isinstance(current_message, HumanMessage)
+        if current_message.content == "first":
+            self.first_request_started.set()
+            await self.release_first_request.wait()
+        elif current_message.content == "second":
+            self.second_request_started.set()
+        else:
+            raise AssertionError(f"Unexpected user message: {current_message.content}")
+        return LLMResponse(
+            content=f"{current_message.content} reply",
+            finish_reason="stop",
+        )
+
+    async def stream_chat(
+        self,
+        messages: Sequence[BaseMessage],
+        tools: Sequence[Tool] | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        on_delta: Callable[[str], Awaitable[None]] | None = None,
+    ) -> LLMResponse:
+        raise AssertionError("The HTTP application uses the non-streaming AgentRunner path")
+
+
+class _BlockingProvider(LLMProvider):
+    """Wait until cancellation so the HTTP timeout can be verified."""
+
+    def __init__(self) -> None:
+        self.request_started = asyncio.Event()
+        self.request_cancelled = asyncio.Event()
+        self._never_release = asyncio.Event()
+
+    async def chat(
+        self,
+        messages: Sequence[BaseMessage],
+        tools: Sequence[Tool] | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+    ) -> LLMResponse:
+        del messages, tools, max_tokens, temperature
+        self.request_started.set()
+        try:
+            await self._never_release.wait()
+        except asyncio.CancelledError:
+            self.request_cancelled.set()
+            raise
+        raise AssertionError("The blocking provider must be cancelled by the HTTP timeout")
+
+    async def stream_chat(
+        self,
+        messages: Sequence[BaseMessage],
+        tools: Sequence[Tool] | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        on_delta: Callable[[str], Awaitable[None]] | None = None,
+    ) -> LLMResponse:
+        raise AssertionError("The HTTP application uses the non-streaming AgentRunner path")
+
+
 def _create_service(
     tmp_path: Path,
     *,
+    provider: LLMProvider | None = None,
     request_timeout_seconds: float = 1.0,
-) -> tuple[HttpApiService, MessageBus, SessionManager]:
+) -> tuple[HttpApiService, AgentLoop, MessageBus, SessionManager]:
     message_bus = MessageBus()
     session_manager = SessionManager(tmp_path)
+    agent_loop = AgentLoop(
+        runner=AgentRunner(),
+        provider=provider or _StaticProvider("assistant reply"),
+        tool_registry=ToolRegistry(),
+        session_manager=session_manager,
+        context_builder=ContextBuilder(),
+        message_bus=message_bus,
+    )
     service = HttpApiService(
-        message_bus,
+        agent_loop,
         session_manager,
         ApiConfig(request_timeout_seconds=request_timeout_seconds),
     )
-    return service, message_bus, session_manager
+    return service, agent_loop, message_bus, session_manager
 
 
 async def _start_client(service: HttpApiService) -> TestClient:
@@ -75,47 +163,45 @@ async def _start_client(service: HttpApiService) -> TestClient:
     return client
 
 
-async def _reply_once(message_bus: MessageBus, *, content: str) -> InboundMessage:
-    inbound = await message_bus.consume_inbound()
-    await message_bus.publish_outbound(
-        OutboundMessage(
-            session_id=inbound.session_id,
-            content=content,
-            metadata=inbound.metadata,
-        )
-    )
-    return inbound
-
-
-def test_post_message_publishes_current_inbound_message_and_returns_bus_response(
+def test_post_message_calls_agent_loop_directly_without_using_message_bus(
     tmp_path: Path,
 ) -> None:
-    service, message_bus, _session_manager = _create_service(tmp_path)
+    provider = _StaticProvider("assistant reply")
+    service, _agent_loop, message_bus, session_manager = _create_service(
+        tmp_path,
+        provider=provider,
+    )
 
-    async def run_scenario() -> tuple[dict[str, object], InboundMessage]:
+    async def run_scenario() -> dict[str, object]:
         client = await _start_client(service)
         try:
-            reply_task = asyncio.create_task(_reply_once(message_bus, content="assistant reply"))
             response = await client.post(
                 "/v1/messages",
                 json={"session_id": "session-1", "content": "hello"},
-                headers={"Authorization": "Bearer ignored"},
             )
-            payload = await response.json()
-            return payload, await reply_task
+            assert response.status == 200
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(message_bus.consume_inbound(), timeout=0.05)
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(message_bus.consume_outbound(), timeout=0.05)
+            return await response.json()
         finally:
             await client.close()
 
-    payload, inbound = asyncio.run(run_scenario())
+    payload = asyncio.run(run_scenario())
 
     assert payload == {"session_id": "session-1", "content": "assistant reply"}
-    assert inbound.session_id == "session-1"
-    assert inbound.content == "hello"
-    assert set(inbound.metadata) == {"_http_request_id"}
+    assert provider.chat_calls[-1][-1] == HumanMessage(content="hello")
+    saved_session = session_manager.get("session-1")
+    assert saved_session is not None
+    assert saved_session.messages == (
+        HumanMessage(content="hello"),
+        AIMessage(content="assistant reply"),
+    )
 
 
 def test_post_message_rejects_invalid_request_bodies(tmp_path: Path) -> None:
-    service, _message_bus, _session_manager = _create_service(tmp_path)
+    service, _agent_loop, _message_bus, _session_manager = _create_service(tmp_path)
 
     async def run_scenario() -> list[tuple[int, str]]:
         client = await _start_client(service)
@@ -150,171 +236,157 @@ def test_post_message_rejects_invalid_request_bodies(tmp_path: Path) -> None:
     ]
 
 
-def test_post_message_correlates_concurrent_outbound_responses(tmp_path: Path) -> None:
-    service, message_bus, _session_manager = _create_service(tmp_path)
+def test_post_message_serializes_concurrent_direct_calls_for_the_same_session(
+    tmp_path: Path,
+) -> None:
+    provider = _GateProvider()
+    service, _agent_loop, _message_bus, session_manager = _create_service(
+        tmp_path,
+        provider=provider,
+    )
 
-    async def post(client: TestClient, content: str):
-        return await client.post(
+    async def post(client: TestClient, content: str) -> dict[str, object]:
+        response = await client.post(
             "/v1/messages",
             json={"session_id": "shared-session", "content": content},
         )
-
-    async def respond_out_of_order() -> None:
-        first = await message_bus.consume_inbound()
-        second = await message_bus.consume_inbound()
-        await message_bus.publish_outbound(
-            OutboundMessage(
-                session_id=second.session_id,
-                content="reply to second",
-                metadata=second.metadata,
-            )
-        )
-        await message_bus.publish_outbound(
-            OutboundMessage(
-                session_id=first.session_id,
-                content="reply to first",
-                metadata=first.metadata,
-            )
-        )
+        assert response.status == 200
+        return await response.json()
 
     async def run_scenario() -> tuple[dict[str, object], dict[str, object]]:
         client = await _start_client(service)
         try:
-            first_task = asyncio.create_task(post(client, "first"))
-            second_task = asyncio.create_task(post(client, "second"))
-            responder_task = asyncio.create_task(respond_out_of_order())
-            await responder_task
-            first_response, second_response = await asyncio.gather(first_task, second_task)
-            return await first_response.json(), await second_response.json()
+            first_request = asyncio.create_task(post(client, "first"))
+            await asyncio.wait_for(provider.first_request_started.wait(), timeout=1)
+            second_request = asyncio.create_task(post(client, "second"))
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(provider.second_request_started.wait(), timeout=0.05)
+
+            provider.release_first_request.set()
+            return await asyncio.gather(first_request, second_request)
         finally:
             await client.close()
 
     first_payload, second_payload = asyncio.run(run_scenario())
 
-    assert first_payload == {"session_id": "shared-session", "content": "reply to first"}
-    assert second_payload == {"session_id": "shared-session", "content": "reply to second"}
+    assert first_payload == {"session_id": "shared-session", "content": "first reply"}
+    assert second_payload == {"session_id": "shared-session", "content": "second reply"}
+    assert provider.chat_calls[0][-1] == HumanMessage(content="first")
+    assert provider.chat_calls[1][0].role == "system"
+    assert provider.chat_calls[1][1:] == (
+        HumanMessage(content="first"),
+        AIMessage(content="first reply"),
+        HumanMessage(content="second"),
+    )
+    saved_session = session_manager.get("shared-session")
+    assert saved_session is not None
+    assert saved_session.messages == (
+        HumanMessage(content="first"),
+        AIMessage(content="first reply"),
+        HumanMessage(content="second"),
+        AIMessage(content="second reply"),
+    )
 
 
-def test_post_message_discards_a_late_timeout_response_before_the_next_request(
-    tmp_path: Path,
-) -> None:
-    service, message_bus, _session_manager = _create_service(
+def test_post_message_times_out_and_cancels_the_direct_agent_turn(tmp_path: Path) -> None:
+    provider = _BlockingProvider()
+    service, _agent_loop, _message_bus, session_manager = _create_service(
         tmp_path,
+        provider=provider,
         request_timeout_seconds=0.05,
     )
 
-    async def run_scenario() -> tuple[dict[str, object], dict[str, object]]:
+    async def run_scenario() -> tuple[int, dict[str, object], bool, bool]:
         client = await _start_client(service)
         try:
-            timed_out = await client.post(
+            response = await client.post(
                 "/v1/messages",
-                json={"session_id": "session-1", "content": "first"},
+                json={"session_id": "session-1", "content": "slow request"},
             )
-            first_payload = await timed_out.json()
-            first_inbound = await message_bus.consume_inbound()
-            await message_bus.publish_outbound(
-                OutboundMessage(
-                    session_id=first_inbound.session_id,
-                    content="late reply",
-                    metadata=first_inbound.metadata,
-                )
+            await asyncio.wait_for(provider.request_started.wait(), timeout=1)
+            await asyncio.wait_for(provider.request_cancelled.wait(), timeout=1)
+            return (
+                response.status,
+                await response.json(),
+                provider.request_started.is_set(),
+                provider.request_cancelled.is_set(),
             )
-            await asyncio.sleep(0)
-
-            reply_task = asyncio.create_task(_reply_once(message_bus, content="second reply"))
-            second_response = await client.post(
-                "/v1/messages",
-                json={"session_id": "session-1", "content": "second"},
-            )
-            second_payload = await second_response.json()
-            await reply_task
-            return first_payload, second_payload
         finally:
             await client.close()
 
-    first_payload, second_payload = asyncio.run(run_scenario())
+    status, payload, request_started, request_cancelled = asyncio.run(run_scenario())
 
-    assert first_payload["error"]["code"] == "agent_timeout"
-    assert second_payload == {"session_id": "session-1", "content": "second reply"}
+    assert status == 504
+    assert payload["error"]["code"] == "agent_timeout"
+    assert request_started is True
+    assert request_cancelled is True
+    assert session_manager.get("session-1") is None
 
 
-def test_post_message_reaches_the_real_agent_loop_and_clear_is_persisted(tmp_path: Path) -> None:
-    provider = _StaticProvider("agent reply")
-    message_bus = MessageBus()
-    session_manager = SessionManager(tmp_path)
-    agent_loop = AgentLoop(
-        runner=AgentRunner(),
-        provider=provider,
-        tool_registry=ToolRegistry(),
-        session_manager=session_manager,
-        context_builder=ContextBuilder(),
-        message_bus=message_bus,
-    )
-    service = HttpApiService(
-        message_bus,
-        session_manager,
-        ApiConfig(request_timeout_seconds=1),
-    )
+def test_post_message_returns_agent_error_when_the_direct_loop_raises(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    service, agent_loop, _message_bus, _session_manager = _create_service(tmp_path)
 
-    async def run_scenario() -> tuple[dict[str, object], dict[str, object]]:
-        loop_task = asyncio.create_task(agent_loop.run())
+    async def fail(inbound: InboundMessage) -> OutboundMessage:
+        del inbound
+        raise RuntimeError("internal direct-loop detail")
+
+    monkeypatch.setattr(agent_loop, "_process_inbound", fail)
+
+    async def run_scenario() -> tuple[int, dict[str, object]]:
         client = await _start_client(service)
         try:
-            message_response = await client.post(
+            response = await client.post(
                 "/v1/messages",
                 json={"session_id": "session-1", "content": "hello"},
             )
-            clear_response = await client.post(
-                "/v1/sessions/clear",
-                json={"session_id": "session-1"},
-            )
-            assert message_response.status == 200
-            assert clear_response.status == 200
-            return await message_response.json(), await clear_response.json()
+            return response.status, await response.json()
         finally:
             await client.close()
-            loop_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await loop_task
 
-    message_payload, clear_payload = asyncio.run(run_scenario())
+    status, payload = asyncio.run(run_scenario())
 
-    assert message_payload == {"session_id": "session-1", "content": "agent reply"}
-    assert clear_payload["session_id"] == "session-1"
-    assert clear_payload["cleared"] is True
-    assert provider.chat_calls[-1][-1] == HumanMessage(content="hello")
-    saved_session = session_manager.get("session-1")
-    assert saved_session is not None
-    assert saved_session.messages == ()
+    assert status == 502
+    assert payload["error"]["code"] == "agent_error"
+    assert "internal direct-loop detail" not in payload["error"]["message"]
 
 
-def test_post_message_returns_service_unavailable_when_router_stops(tmp_path: Path) -> None:
-    service, message_bus, _session_manager = _create_service(tmp_path)
+def test_post_message_rejects_a_mismatched_direct_loop_response(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    service, agent_loop, _message_bus, _session_manager = _create_service(tmp_path)
 
-    async def run_scenario() -> dict[str, object]:
+    async def mismatched(inbound: InboundMessage) -> OutboundMessage:
+        return OutboundMessage(
+            session_id="another-session",
+            content="unexpected reply",
+            metadata=inbound.metadata,
+        )
+
+    monkeypatch.setattr(agent_loop, "_process_inbound", mismatched)
+
+    async def run_scenario() -> tuple[int, dict[str, object]]:
         client = await _start_client(service)
         try:
-            request_task = asyncio.create_task(
-                client.post(
-                    "/v1/messages",
-                    json={"session_id": "session-1", "content": "hello"},
-                )
+            response = await client.post(
+                "/v1/messages",
+                json={"session_id": "session-1", "content": "hello"},
             )
-            await asyncio.wait_for(message_bus.consume_inbound(), timeout=1)
-            await service.stop()
-            response = await asyncio.wait_for(request_task, timeout=1)
-            assert response.status == 503
-            return await response.json()
+            return response.status, await response.json()
         finally:
             await client.close()
 
-    payload = asyncio.run(run_scenario())
+    status, payload = asyncio.run(run_scenario())
 
-    assert payload["error"]["code"] == "agent_unavailable"
+    assert status == 502
+    assert payload["error"]["code"] == "invalid_agent_response"
 
 
 def test_clear_session_resets_persisted_history(tmp_path: Path) -> None:
-    service, _message_bus, session_manager = _create_service(tmp_path)
+    service, _agent_loop, _message_bus, session_manager = _create_service(tmp_path)
     session_manager.save(
         session_manager.get_or_create("session/with/slashes").with_messages(
             (
@@ -348,7 +420,7 @@ def test_clear_session_resets_persisted_history(tmp_path: Path) -> None:
 def test_session_endpoints_return_only_persisted_user_and_assistant_messages(
     tmp_path: Path,
 ) -> None:
-    service, _message_bus, session_manager = _create_service(tmp_path)
+    service, _agent_loop, _message_bus, session_manager = _create_service(tmp_path)
     session_manager.save(
         session_manager.get_or_create("session-1").with_messages(
             (

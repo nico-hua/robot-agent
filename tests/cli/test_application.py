@@ -88,13 +88,13 @@ def test_application_starts_agent_loop_before_http_and_closes_both(tmp_path: Pat
     captured: dict[str, object] = {}
 
     def create_api_service(
-        message_bus: object,
+        agent_loop: object,
         session_manager: SessionManager,
         config: ApiConfig,
     ) -> _FakeApiService:
         captured.update(
             {
-                "message_bus": message_bus,
+                "agent_loop": agent_loop,
                 "session_manager": session_manager,
                 "config": config,
             }
@@ -117,7 +117,7 @@ def test_application_starts_agent_loop_before_http_and_closes_both(tmp_path: Pat
 
     assert api_service.start_calls == 1
     assert api_service.stop_calls == 1
-    assert captured["message_bus"] is application.message_bus
+    assert captured["agent_loop"] is application.agent_loop
     assert captured["session_manager"] is application.session_manager
     assert captured["config"] == ApiConfig(port=8001)
     assert application.config == _agent_config(tmp_path)

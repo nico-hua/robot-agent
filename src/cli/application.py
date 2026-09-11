@@ -32,7 +32,7 @@ AgentLoopFactory = Callable[
     AgentLoop,
 ]
 ApiServiceFactory = Callable[
-    [MessageBus, SessionManager, ApiConfig],
+    [AgentLoop, SessionManager, ApiConfig],
     HttpApiService,
 ]
 
@@ -71,7 +71,7 @@ class Application:
             self._message_bus,
         )
         self._api_service = api_service_factory(
-            self._message_bus,
+            self._agent_loop,
             self._session_manager,
             config.api,
         )
@@ -95,7 +95,7 @@ class Application:
 
     @property
     def message_bus(self) -> MessageBus:
-        """Return the bus shared by HTTP requests and the AgentLoop."""
+        """Return the bus retained for the AgentLoop's queued input path."""
 
         return self._message_bus
 
@@ -247,12 +247,12 @@ def _create_agent_loop(
 
 
 def _create_http_api_service(
-    message_bus: MessageBus,
+    agent_loop: AgentLoop,
     session_manager: SessionManager,
     api_config: ApiConfig,
 ) -> HttpApiService:
     return HttpApiService(
-        message_bus,
+        agent_loop,
         session_manager,
         api_config,
     )

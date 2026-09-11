@@ -1,66 +1,51 @@
-"""Local aiohttp API backed by the shared message bus."""
+"""Local aiohttp API that invokes the AgentLoop directly."""
 
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
-import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import urlparse
 
 from aiohttp import web
 
-from ..bus import InboundMessage, MessageBus, OutboundMessage
+from ..agent.loop import AgentLoop
+from ..bus import InboundMessage, OutboundMessage
 from ..config import ApiConfig
 from ..providers import AIMessage, BaseMessage
 from ..session import Session, SessionManager
 
 logger = logging.getLogger(__name__)
 
-_HTTP_REQUEST_ID_METADATA_KEY = "_http_request_id"
 _MAX_REQUEST_BODY_BYTES = 1_048_576
 _SHUTDOWN_TIMEOUT_SECONDS = 1.0
 
 
-class _OutboundRouterStoppedError(RuntimeError):
-    """Raised when a request loses the service's outbound response router."""
-
-
 class HttpApiService:
-    """Serve local JSON requests through the application's ``MessageBus``.
-
-    A single outbound router consumes the shared outbound queue and uses a
-    private correlation ID in message metadata to resolve the matching HTTP
-    request. This prevents concurrent handlers from consuming each other's
-    responses.
-    """
+    """Serve local JSON requests through the application's ``AgentLoop``."""
 
     def __init__(
         self,
-        message_bus: MessageBus,
+        agent_loop: AgentLoop,
         session_manager: SessionManager,
         config: ApiConfig,
     ) -> None:
-        if not isinstance(message_bus, MessageBus):
-            raise TypeError("HttpApiService requires a MessageBus")
+        if not isinstance(agent_loop, AgentLoop):
+            raise TypeError("HttpApiService requires an AgentLoop")
         if not isinstance(session_manager, SessionManager):
             raise TypeError("HttpApiService requires a SessionManager")
         if not isinstance(config, ApiConfig):
             raise TypeError("HttpApiService requires an ApiConfig")
 
-        self._message_bus = message_bus
+        self._agent_loop = agent_loop
         self._session_manager = session_manager
         self._config = config
-        self._pending_responses: dict[str, asyncio.Future[OutboundMessage]] = {}
-        self._outbound_router_task: asyncio.Task[None] | None = None
         self._app = web.Application(
             client_max_size=_MAX_REQUEST_BODY_BYTES,
             middlewares=(_cors_middleware, _error_middleware),
         )
-        self._app.on_startup.append(self._start_outbound_router)
-        self._app.on_cleanup.append(self._stop_outbound_router)
         self._app.router.add_get("/health", self._health)
         self._app.router.add_post("/v1/messages", self._post_message)
         self._app.router.add_post("/v1/sessions/clear", self._clear_session_request)
@@ -128,72 +113,16 @@ class HttpApiService:
         )
 
     async def stop(self) -> None:
-        """Stop the listener and release all pending HTTP response waiters."""
+        """Stop the listener."""
 
         runner = self._runner
         self._runner = None
         if runner is not None:
             await runner.cleanup()
-        else:
-            await self._stop_outbound_router(self._app)
 
         if self._started:
             logger.info("HTTP API service stopped")
         self._started = False
-
-    async def _start_outbound_router(self, app: web.Application) -> None:
-        """Start the sole outbound consumer before accepting HTTP requests."""
-
-        del app
-        if self._outbound_router_task is None or self._outbound_router_task.done():
-            self._outbound_router_task = asyncio.create_task(self._route_outbound_messages())
-
-    async def _stop_outbound_router(self, app: web.Application) -> None:
-        """Stop outbound routing and fail waiters that can no longer complete."""
-
-        del app
-        task = self._outbound_router_task
-        self._outbound_router_task = None
-        if task is not None and not task.done():
-            task.cancel()
-        if task is not None:
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                logger.exception("HTTP outbound response router stopped with an error")
-        self._fail_pending_responses()
-
-    async def _route_outbound_messages(self) -> None:
-        """Dispatch correlated outbound messages to their waiting HTTP handlers."""
-
-        try:
-            while True:
-                outbound = await self._message_bus.consume_outbound()
-                request_id = outbound.metadata.get(_HTTP_REQUEST_ID_METADATA_KEY)
-                if not isinstance(request_id, str):
-                    logger.debug("Discarded uncorrelated outbound message from the HTTP queue")
-                    continue
-                response_future = self._pending_responses.pop(request_id, None)
-                if response_future is None or response_future.done():
-                    logger.debug("Discarded late or unknown HTTP outbound response")
-                    continue
-                response_future.set_result(outbound)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("HTTP outbound response router failed")
-            self._fail_pending_responses()
-            raise
-
-    def _fail_pending_responses(self) -> None:
-        """Wake all HTTP handlers when their response router has stopped."""
-
-        for response_future in self._pending_responses.values():
-            if not response_future.done():
-                response_future.set_exception(_OutboundRouterStoppedError())
-        self._pending_responses.clear()
 
     async def _health(self, request: web.Request) -> web.Response:
         del request
@@ -212,17 +141,13 @@ class HttpApiService:
             return _error_response(400, "invalid_content", "content must be a string")
 
         try:
-            outbound = await self._publish_and_wait(session_id, content)
+            outbound = await self._process_inbound(session_id, content)
         except TimeoutError:
             return _error_response(504, "agent_timeout", "Agent response timed out")
-        except _OutboundRouterStoppedError:
-            return _error_response(
-                503, "agent_unavailable", "Agent response routing is unavailable"
-            )
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("Could not publish an HTTP message to the AgentLoop")
+            logger.exception("Could not process an HTTP message through the AgentLoop")
             return _error_response(502, "agent_error", "Agent failed to process the message")
 
         if outbound.session_id != session_id:
@@ -233,33 +158,17 @@ class HttpApiService:
             )
         return _json_response({"session_id": session_id, "content": outbound.content})
 
-    async def _publish_and_wait(self, session_id: str, content: str) -> OutboundMessage:
-        """Publish one input and await only its correlated outbound response."""
+    async def _process_inbound(self, session_id: str, content: str) -> OutboundMessage:
+        """Invoke one agent turn directly and retain the HTTP timeout boundary."""
 
-        router_task = self._outbound_router_task
-        if router_task is None or router_task.done():
-            raise _OutboundRouterStoppedError()
-
-        request_id = uuid.uuid4().hex
-        response_future: asyncio.Future[OutboundMessage] = (
-            asyncio.get_running_loop().create_future()
-        )
-        self._pending_responses[request_id] = response_future
         inbound = InboundMessage(
             session_id=session_id,
             content=content,
-            metadata={_HTTP_REQUEST_ID_METADATA_KEY: request_id},
         )
-        try:
-            await self._message_bus.publish_inbound(inbound)
-            return await asyncio.wait_for(
-                asyncio.shield(response_future),
-                timeout=self._config.request_timeout_seconds,
-            )
-        finally:
-            pending_response = self._pending_responses.pop(request_id, None)
-            if pending_response is not None and not pending_response.done():
-                pending_response.cancel()
+        return await asyncio.wait_for(
+            self._agent_loop._process_inbound(inbound),
+            timeout=self._config.request_timeout_seconds,
+        )
 
     async def _clear_session_request(self, request: web.Request) -> web.Response:
         payload = await _read_json_object(request)
