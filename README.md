@@ -5,11 +5,14 @@
 项目当前处于“统一 Provider 配置与基础 Provider/Tool 构件”阶段。现有源码包括：
 
 - 基于 Pydantic 的 `ProviderConfig`；
-- 从根目录 `.env` 和进程环境变量加载 Provider 配置的函数；
+- 从根目录 `.env` 和进程环境变量加载 Provider 配置与本地工作目录的函数；
 - OpenAI-compatible Provider 适配器源码；
 - 通用消息模型、工具抽象、工具注册表和内建工具发现基础设施。
+- 最小持久化会话：仅维护消息历史的 `Session`、JSONL 存储和 `SessionManager`。
 
 当前包含最小、非流式的 `AgentRunner`：它按轮调用 `provider.chat()`，顺序处理模型请求的工具调用，并在得到最终响应或达到最大迭代次数时结束。
+
+`Session` 不维护摘要、摘要边界或目标状态；旧 JSONL 会话文件中的这些已移除 Header 字段会在读取时忽略，并在下一次保存时移除。
 
 尚未实现流式 Agent 执行、目标模式、消息注入、运行时调度、具体内建工具、设备控制、ROS 2 或硬件适配。Provider 的真实服务联调也不会在默认测试中执行。
 
@@ -34,6 +37,11 @@ robot-agent/
 │   │   ├── factory.py
 │   │   ├── messages.py
 │   │   ├── openai_compat_provider.py
+│   ├── session/
+│   │   ├── __init__.py
+│   │   ├── manager.py
+│   │   ├── models.py
+│   │   └── storage.py
 │   └── tools/
 │       ├── base.py
 │       ├── context.py
@@ -47,13 +55,15 @@ robot-agent/
     │   └── test_loader.py
     ├── providers/
     │   └── test_factory.py
+    ├── session/
+    │   └── test_session_lifecycle.py
     └── tools/
         ├── test_base.py
         ├── test_tool_loader.py
         └── test_registry.py
 ```
 
-`robot-agent` 是项目/发行名称，`src` 是 Python 导入包名。当前打包配置包含 `src.agent`、`src.config`、`src.providers`、`src.tools` 和 `src.tools.builtin`。
+`robot-agent` 是项目/发行名称，`src` 是 Python 导入包名。当前打包配置包含 `src.agent`、`src.config`、`src.providers`、`src.session`、`src.tools` 和 `src.tools.builtin`。
 
 ## Python 与 uv
 
@@ -74,11 +84,12 @@ uv run ruff format --check .
 
 Ruff 的项目行长规则为 100 个字符。`.env` 是本机配置文件，已被 Git 忽略；只能提交 `.env.example`，不能提交密钥或个人端点配置。
 
-## 统一 Provider 配置
+## 项目配置
 
-根目录 `.env` 使用项目级 `PROVIDER_*` 变量，而非特定模型服务的变量：
+根目录 `.env` 使用项目级 `PROVIDER_*` 变量和 `WORKSPACE_PATH`，而非特定模型服务的变量：
 
 ```dotenv
+WORKSPACE_PATH=./workspace
 PROVIDER_TYPE=openai_compat
 PROVIDER_API_KEY=
 PROVIDER_API_BASE=https://api.openai.com/v1
@@ -91,13 +102,15 @@ PROVIDER_TEMPERATURE=0.7
 
 - `openai_compat`
 
-调用 `src.config.load_provider_config()` 时才会读取 `.env`；已存在的进程环境变量优先于 `.env` 值。环境变量会被映射为 `ProviderConfig` 的 `type`、`api_key`、`api_base`、`default_model`、`default_max_tokens` 与 `default_temperature`。数值转换和非法配置由 Pydantic 负责。
+调用 `src.config.load_provider_config()` 或 `src.config.load_workspace_path()` 时才会读取 `.env`；已存在的进程环境变量优先于 `.env` 值。`PROVIDER_*` 环境变量会被映射为 `ProviderConfig` 的 `type`、`api_key`、`api_base`、`default_model`、`default_max_tokens` 与 `default_temperature`。`WORKSPACE_PATH` 是本地工作目录；未显式传入路径的 `SessionManager()` 会使用它，且相对路径按当前工作目录解析。
 
 对于不需要凭据的本地兼容端点，`PROVIDER_API_KEY` 可以留空；托管服务通常需要由本机用户填写真实 API Key。应用不得记录或输出该值。
 
+仓库根目录的 `workspace/` 用于本地会话数据，已被 Git 忽略，不应提交其中的内容。
+
 ## 测试与文档
 
-默认测试覆盖离线配置加载、Provider 工厂构造、Tool 基础设施和非流式 AgentRunner 行为，不连接 Provider 服务、网络、GPU 或设备。当前开发进度记录在 [docs/development-progress.md](docs/development-progress.md)。
+默认测试覆盖离线配置加载、Provider 工厂构造、Tool 基础设施、非流式 AgentRunner，以及 Session/JSONL 生命周期行为；不连接 Provider 服务、网络、GPU 或设备。当前开发进度记录在 [docs/development-progress.md](docs/development-progress.md)。
 
 后续开发必须遵守 [AGENTS.md](AGENTS.md)：先阅读相关文件，保持职责清晰，避免不必要抽象，并使代码、配置、测试和文档保持一致。
 
@@ -106,4 +119,4 @@ PROVIDER_TEMPERATURE=0.7
 - Provider 的真实服务联调与端到端集成测试；
 - 流式 Agent 执行、目标模式、消息注入和运行时调度；
 - 具体内建工具、设备控制、ROS 2 和硬件适配；
-- 会话存储、外部系统连接、通信协议和服务启动入口。
+- 外部系统连接、通信协议和服务启动入口。

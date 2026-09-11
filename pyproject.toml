@@ -27,6 +27,7 @@ packages = [
     "src.agent",
     "src.config",
     "src.providers",
+    "src.session",
     "src.tools",
     "src.tools.builtin",
 ]

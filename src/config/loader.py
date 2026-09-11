@@ -33,13 +33,7 @@ def load_provider_config(
     unset so optional API keys can remain blank for compatible local endpoints.
     """
 
-    if environ is None:
-        dotenv_environment = {
-            name: value
-            for name, value in dotenv_values(_PROJECT_ENV_FILE).items()
-            if value is not None
-        }
-        environ = {**dotenv_environment, **os.environ}
+    environ = _load_environment(environ)
 
     values = {
         field_name: value
@@ -49,4 +43,29 @@ def load_provider_config(
     return ProviderConfig.model_validate(values)
 
 
-__all__ = ["load_provider_config"]
+def load_workspace_path(environ: Mapping[str, str] | None = None) -> Path:
+    """Return the normalized workspace path from ``WORKSPACE_PATH``.
+
+    The lookup follows the same root ``.env`` and process-environment
+    precedence as :func:`load_provider_config`. Relative paths are resolved
+    from the current working directory. The function does not create the
+    directory.
+    """
+
+    workspace_value = _load_environment(environ).get("WORKSPACE_PATH")
+    if workspace_value is None or not workspace_value.strip():
+        raise ValueError("WORKSPACE_PATH must be set to a non-empty path")
+    return Path(workspace_value.strip()).expanduser().resolve()
+
+
+def _load_environment(environ: Mapping[str, str] | None) -> Mapping[str, str]:
+    if environ is not None:
+        return environ
+
+    dotenv_environment = {
+        name: value for name, value in dotenv_values(_PROJECT_ENV_FILE).items() if value is not None
+    }
+    return {**dotenv_environment, **os.environ}
+
+
+__all__ = ["load_provider_config", "load_workspace_path"]

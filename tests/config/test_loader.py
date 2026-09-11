@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 from src.config import loader
-from src.config.loader import load_provider_config
+from src.config.loader import load_provider_config, load_workspace_path
 
 
 def _provider_environment(**overrides: str) -> dict[str, str]:
@@ -80,3 +80,36 @@ def test_load_provider_config_rejects_unsupported_provider_type() -> None:
 def test_load_provider_config_reports_missing_required_values() -> None:
     with pytest.raises(ValidationError):
         load_provider_config({"PROVIDER_TYPE": "openai_compat"})
+
+
+def test_load_workspace_path_uses_explicit_environment(tmp_path: Path) -> None:
+    workspace = load_workspace_path({"WORKSPACE_PATH": str(tmp_path)})
+
+    assert workspace == tmp_path.resolve()
+
+
+def test_load_workspace_path_uses_process_environment_over_dotenv(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file = tmp_path / ".env"
+    dotenv_workspace = tmp_path / "dotenv-workspace"
+    process_workspace = tmp_path / "process-workspace"
+    env_file.write_text(
+        f"WORKSPACE_PATH={dotenv_workspace}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(loader, "_PROJECT_ENV_FILE", env_file)
+    monkeypatch.setenv("WORKSPACE_PATH", str(process_workspace))
+
+    workspace = load_workspace_path()
+
+    assert workspace == process_workspace.resolve()
+
+
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_load_workspace_path_rejects_missing_or_blank_value(value: str | None) -> None:
+    environ = {} if value is None else {"WORKSPACE_PATH": value}
+
+    with pytest.raises(ValueError, match="WORKSPACE_PATH"):
+        load_workspace_path(environ)

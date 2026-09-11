@@ -2,7 +2,7 @@
 
 ## 当前开发阶段
 
-当前处于“统一 Provider 配置、基础 Provider/Tool 构件与最小非流式 AgentRunner”阶段。项目以 `ProviderConfig` 描述 OpenAI-compatible Provider 的基础连接与模型参数；根目录 `.env` 仅作为本地配置来源。默认测试不连接真实 Provider 服务。
+当前处于“统一 Provider 配置、基础 Provider/Tool 构件、最小非流式 AgentRunner 与最小持久化会话”阶段。项目以 `ProviderConfig` 描述 OpenAI-compatible Provider 的基础连接与模型参数；根目录 `.env` 提供 Provider 和本地工作目录配置。默认测试不连接真实 Provider 服务。
 
 ## 已完成功能
 
@@ -20,6 +20,11 @@
 - 移除 Anthropic-compatible Provider、Anthropic Tool Schema 与 `anthropic` 依赖，当前仅保留 OpenAI-compatible Provider 支持。
 - 新增 29 个 Tool 子系统离线测试，覆盖 Tool 定义与 OpenAI Function Schema、注册表参数校验与执行错误、取消传播，以及内建 Tool 发现和过滤。
 - 新增最小非流式 `AgentRunner`：每轮固定调用 `provider.chat()`，顺序处理 Tool Call 与 Tool Result；不包含 `stream_chat`、目标模式、消息注入或 Tool Call 回调。新增 5 个离线 Runner 测试，覆盖普通响应、工具循环、禁用工具、最大迭代边界与非流式调用路径。
+- 新增最小持久化会话：`Session` 仅保存消息历史，`JsonlSessionStorage` 和 `SessionManager` 不再维护 `summary`、`summary_until`、`goal_state` 或目标状态相关 API。旧 JSONL Header 中的这三个字段会在读取时忽略，并在下一次保存时移除；新增 4 个离线生命周期测试。
+
+### 2026-09-11
+
+- 新增项目级 `WORKSPACE_PATH` 本地配置：`load_workspace_path()` 与 Provider 配置使用相同的 `.env`/进程环境变量优先级；未传入路径的 `SessionManager()` 使用该配置。仓库根目录 `workspace/` 已被 Git 忽略，默认测试覆盖路径加载、优先级、空值校验和 Manager 回退行为。
 
 ## 待开发功能
 
@@ -27,7 +32,7 @@
 - 具体内建工具及其权限、失败处理和测试；
 - 流式 Agent 执行、目标模式、消息注入、运行时调度和任务编排；
 - ROS 2、机器人控制和硬件适配；
-- 会话存储、外部系统连接、通信协议和服务启动入口。
+- 外部系统连接、通信协议和服务启动入口。
 
 ## 待优化项
 
@@ -38,4 +43,4 @@
 ## 待解决问题
 
 - 本地 `.env` 中必须由用户填写与所选 Provider 匹配的 API Base、模型名，以及托管服务所需的 API Key。
-- 当前默认测试验证配置加载、Provider 工厂构造、Tool 基础设施与非流式 AgentRunner；不会验证凭据有效性、模型可用性或实际网络连接。
+- 当前默认测试验证配置加载、Provider 工厂构造、Tool 基础设施、非流式 AgentRunner 与 Session 持久化生命周期；不会验证凭据有效性、模型可用性或实际网络连接。
