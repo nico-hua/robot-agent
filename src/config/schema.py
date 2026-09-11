@@ -1,7 +1,8 @@
-"""Configuration models for the project's LLM provider."""
+"""Configuration models for the local agent application."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
 from pydantic import (
@@ -44,3 +45,31 @@ class ProviderConfig(BaseModel):
         if not value.strip():
             raise ValueError("must not be blank")
         return value
+
+
+class ApiConfig(BaseModel):
+    """Local HTTP API settings loaded from project environment configuration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    host: str = "127.0.0.1"
+    port: int = Field(default=8000, ge=1, le=65535)
+    request_timeout_seconds: float = Field(default=60.0, gt=0)
+
+    @field_validator("host")
+    @classmethod
+    def _reject_blank_host(cls, value: str) -> str:
+        normalized_value = value.strip()
+        if not normalized_value:
+            raise ValueError("must not be blank")
+        return normalized_value
+
+
+class AgentConfig(BaseModel):
+    """Root configuration used to assemble the local agent application."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: ProviderConfig
+    api: ApiConfig = Field(default_factory=ApiConfig)
+    workspace_path: Path

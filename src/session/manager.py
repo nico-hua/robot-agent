@@ -5,18 +5,20 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ..config import load_workspace_path
+from ..config import load_agent_config
 from .models import Session, _validate_session_key
 from .storage import JsonlSessionStorage
 
 
 class SessionManager:
-    """Create, save, delete, and list sessions in a workspace's sessions directory."""
+    """Create, save, clear, delete, and list sessions in a workspace directory."""
 
     def __init__(self, workspace: str | Path | None = None) -> None:
         """Create a manager using an explicit or configured workspace path."""
 
-        self._workspace = Path(workspace) if workspace is not None else load_workspace_path()
+        self._workspace = (
+            Path(workspace) if workspace is not None else load_agent_config().workspace_path
+        )
         self._storage = JsonlSessionStorage(self._workspace / "sessions")
 
     @property
@@ -45,6 +47,12 @@ class SessionManager:
         saved_session = session.with_updated_at(datetime.now(timezone.utc))
         self._storage.save(saved_session)
         return saved_session
+
+    def clear_messages(self, session_key: str) -> Session:
+        """Reset and persist all messages for one session key."""
+
+        session = self.get_or_create(session_key)
+        return self.save(session.reset())
 
     def delete(self, session_key: str) -> bool:
         """Delete one saved session and report whether it existed."""

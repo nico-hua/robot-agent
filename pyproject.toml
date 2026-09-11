@@ -9,10 +9,14 @@ description = "Configurable OpenAI-compatible LLM provider layer."
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 dependencies = [
+    "aiohttp>=3.14.3",
     "openai>=3.11.0",
     "pydantic>=2.9",
     "python-dotenv>=1.2.3",
 ]
+
+[project.scripts]
+robot-agent = "src.cli.main:main"
 
 [dependency-groups]
 dev = [
@@ -25,7 +29,9 @@ package-dir = {src = "src"}
 packages = [
     "src",
     "src.agent",
+    "src.api",
     "src.bus",
+    "src.cli",
     "src.config",
     "src.providers",
     "src.session",

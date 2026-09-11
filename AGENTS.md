@@ -1,6 +1,6 @@
 # 项目开发规范
 
-本仓库当前围绕统一 Provider 配置、OpenAI-compatible 适配器、通用工具基础设施和最小非流式 AgentRunner 重建。当前源码包含配置加载、Provider/消息接口、工具注册与发现，以及按轮调用 `provider.chat()` 的工具循环；不应把尚未验证的端到端调用、流式执行、运行时调度、自动编排或具体业务能力视为已经实现。
+本仓库当前围绕统一 `AgentConfig`、OpenAI-compatible 适配器、通用工具基础设施、最小非流式 AgentRunner 和本地 HTTP/CLI 装配重建。当前源码包含配置加载、Provider/消息接口、工具注册与发现、按轮调用 `provider.chat()` 的工具循环，以及通过 `MessageBus` 关联 HTTP 入站/出站消息的本地服务源码；不应把尚未验证的真实 Provider 端到端调用、流式执行、运行时调度、自动编排或具体业务能力视为已经实现。
 
 ## 项目原则
 

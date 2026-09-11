@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from src.config import AgentConfig, ProviderConfig
 from src.providers import AIMessage, HumanMessage, SystemMessage, ToolCallRequest, ToolMessage
 from src.session import manager as session_manager
 from src.session.manager import SessionManager
@@ -108,11 +109,39 @@ def test_manager_persists_and_deletes_sessions_without_goal_apis(tmp_path) -> No
     assert manager.delete("managed-key") is False
 
 
+def test_manager_clears_and_persists_one_session_messages(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path)
+    manager.save(
+        manager.get_or_create("managed-key").with_messages(
+            (HumanMessage(content="hello"), AIMessage(content="reply"))
+        )
+    )
+
+    cleared = manager.clear_messages("managed-key")
+
+    assert cleared.key == "managed-key"
+    assert cleared.messages == ()
+    persisted = manager.get("managed-key")
+    assert persisted is not None
+    assert persisted.messages == ()
+
+
 def test_manager_uses_configured_workspace_when_path_is_omitted(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(session_manager, "load_workspace_path", lambda: tmp_path)
+    monkeypatch.setattr(
+        session_manager,
+        "load_agent_config",
+        lambda: AgentConfig(
+            provider=ProviderConfig(
+                type="openai_compat",
+                api_base="https://api.example.test/v1",
+                model="test-model",
+            ),
+            workspace_path=tmp_path,
+        ),
+    )
 
     manager = SessionManager()
 

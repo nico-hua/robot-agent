@@ -1,11 +1,12 @@
 """Public configuration interfaces."""
 
-from .loader import load_provider_config, load_workspace_path
-from .schema import ProviderConfig, ProviderType
+from .loader import load_agent_config
+from .schema import AgentConfig, ApiConfig, ProviderConfig, ProviderType
 
 __all__ = [
+    "AgentConfig",
+    "ApiConfig",
     "ProviderConfig",
     "ProviderType",
-    "load_provider_config",
-    "load_workspace_path",
+    "load_agent_config",
 ]
