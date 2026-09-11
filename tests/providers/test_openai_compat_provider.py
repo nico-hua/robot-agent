@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from src.providers import AIMessage, HumanMessage, ToolCallRequest, ToolMessage
 from src.providers.openai_compat_provider import OpenAICompatProvider
 
@@ -74,11 +75,16 @@ def _stream_chunk(
     )
 
 
-def _provider(client: _RecordingClient) -> OpenAICompatProvider:
+def _provider(
+    client: _RecordingClient,
+    *,
+    default_think: bool = False,
+) -> OpenAICompatProvider:
     return OpenAICompatProvider(
         api_key="test-key",
         api_base="https://api.example.test/v1",
         default_model="test-model",
+        default_think=default_think,
         client=client,
     )
 
@@ -282,3 +288,57 @@ def test_stream_chat_collects_complete_multiple_tool_calls_before_returning_them
     )
     assert response.finish_reason == "tool_calls"
     assert len(client.completions.calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("default_think", "think", "expected_reasoning_effort"),
+    [
+        pytest.param(False, None, "none", id="default-disabled"),
+        pytest.param(True, None, "medium", id="default-enabled"),
+        pytest.param(False, True, "medium", id="explicitly-enabled"),
+        pytest.param(True, False, "none", id="explicitly-disabled"),
+    ],
+)
+def test_chat_passes_resolved_thinking_mode_to_openai_compatible_api(
+    default_think: bool,
+    think: bool | None,
+    expected_reasoning_effort: str,
+) -> None:
+    client = _RecordingClient(_completion())
+
+    asyncio.run(
+        _provider(client, default_think=default_think).chat(
+            (HumanMessage(content="think about this"),),
+            think=think,
+        )
+    )
+
+    assert client.completions.calls[0]["reasoning_effort"] == expected_reasoning_effort
+
+
+@pytest.mark.parametrize(
+    ("default_think", "think", "expected_reasoning_effort"),
+    [
+        pytest.param(False, None, "none", id="default-disabled"),
+        pytest.param(True, None, "medium", id="default-enabled"),
+        pytest.param(False, True, "medium", id="explicitly-enabled"),
+        pytest.param(True, False, "none", id="explicitly-disabled"),
+    ],
+)
+def test_stream_chat_passes_resolved_thinking_mode_to_openai_compatible_api(
+    default_think: bool,
+    think: bool | None,
+    expected_reasoning_effort: str,
+) -> None:
+    client = _RecordingClient(_stream((_stream_chunk(content="done", finish_reason="stop"),)))
+
+    asyncio.run(
+        _provider(client, default_think=default_think).stream_chat(
+            (HumanMessage(content="think about this"),),
+            think=think,
+        )
+    )
+
+    request = client.completions.calls[0]
+    assert request["stream"] is True
+    assert request["reasoning_effort"] == expected_reasoning_effort

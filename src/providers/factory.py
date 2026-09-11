@@ -55,22 +55,24 @@ def _create_ollama_compact_provider(config: ProviderConfig) -> LLMProvider:
     return OllamaCompactProvider(**_ollama_provider_options(config))
 
 
-def _provider_options(config: ProviderConfig) -> dict[str, str | int | float]:
+def _provider_options(config: ProviderConfig) -> dict[str, str | int | float | bool]:
     return {
         "api_key": config.api_key,
         "api_base": config.api_base,
         "default_model": config.default_model,
         "default_max_tokens": config.default_max_tokens,
         "default_temperature": config.default_temperature,
+        "default_think": config.think,
         "timeout": config.request_timeout_seconds,
     }
 
 
-def _ollama_provider_options(config: ProviderConfig) -> dict[str, str | int | float]:
+def _ollama_provider_options(config: ProviderConfig) -> dict[str, str | int | float | bool]:
     return {
         "api_base": config.api_base,
         "default_model": config.default_model,
         "default_max_tokens": config.default_max_tokens,
         "default_temperature": config.default_temperature,
+        "default_think": config.think,
         "timeout": config.request_timeout_seconds,
     }

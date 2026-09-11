@@ -118,6 +118,7 @@ PROVIDER_API_BASE=https://api.openai.com/v1
 PROVIDER_MODEL=your-model-name
 PROVIDER_MAX_TOKENS=1024
 PROVIDER_TEMPERATURE=0.7
+PROVIDER_THINK=false
 PROVIDER_REQUEST_TIMEOUT_SECONDS=60
 API_HOST=127.0.0.1
 API_PORT=8000
@@ -131,6 +132,8 @@ API_REQUEST_TIMEOUT_SECONDS=60
 
 调用 `src.config.load_agent_config()` 时才会读取 `.env`；已存在的进程环境变量优先于 `.env` 值。`PROVIDER_*` 环境变量会被映射为 `AgentConfig.provider`（`ProviderConfig`），`API_*` 会被映射为 `AgentConfig.api`（`ApiConfig`），`WORKSPACE_PATH` 会被映射为 `AgentConfig.workspace_path`。`WORKSPACE_PATH` 是必填的本地工作目录；未显式传入路径的 `SessionManager()` 会从 `AgentConfig` 使用它，且相对路径按当前工作目录解析。
 
+`PROVIDER_THINK` 是可选布尔值，默认 `false`。它会成为 Provider 的默认思考模式；原生 Ollama 请求会直接发送 `think: true/false`，OpenAI-compatible 请求会映射为 `reasoning_effort`（`true` 为 `medium`，`false` 为 `none`）。实际是否支持或遵守该控制项取决于所选模型和服务端。
+
 对于不需要凭据的本地兼容端点，`PROVIDER_API_KEY` 可以留空；托管服务通常需要由本机用户填写真实 API Key。应用不得记录或输出该值。
 
 使用原生 Ollama 时，仍使用同一组通用 `PROVIDER_*` 配置，而不是新增 Ollama 专属配置对象。例如可在本地 `.env` 中设置：
@@ -140,6 +143,7 @@ PROVIDER_TYPE=ollama
 PROVIDER_API_KEY=
 PROVIDER_API_BASE=http://127.0.0.1:11434
 PROVIDER_MODEL=qwen3.5:4b
+PROVIDER_THINK=false
 PROVIDER_REQUEST_TIMEOUT_SECONDS=60
 ```
 

@@ -54,6 +54,7 @@ class LLMProvider(ABC):
         tools: Sequence[Tool] | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
+        think: bool | None = None,
     ) -> LLMResponse:
         """Complete a conversation and return a normalized response."""
 
@@ -67,6 +68,7 @@ class LLMProvider(ABC):
         max_tokens: int | None = None,
         temperature: float | None = None,
         on_delta: Callable[[str], Awaitable[None]] | None = None,
+        think: bool | None = None,
     ) -> LLMResponse:
         """Stream text deltas and return the final normalized response."""
 

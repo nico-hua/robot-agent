@@ -24,6 +24,7 @@
 
 ### 2026-09-11
 
+- `ProviderConfig` 新增布尔配置 `think`，通过 `PROVIDER_THINK` 从 `.env` 或进程环境加载，默认关闭。ProviderFactory 会将其作为 Provider 默认值；`chat()` 与 `stream_chat()` 也支持用 `think` 参数进行单次覆盖。原生 Ollama 请求直接传递 `think: true/false`，OpenAI-compatible 请求映射为 `reasoning_effort`（启用为 `medium`，关闭为 `none`）。离线测试覆盖默认值、环境覆盖、无效布尔值、工厂传递，以及两个 Provider 的非流式/流式请求。
 - 新增项目级 `WORKSPACE_PATH` 本地配置；随后将 Provider、API 与工作目录收敛到根级 `AgentConfig`。`load_agent_config()` 一次读取 `.env`/进程环境变量并构造嵌套 `ProviderConfig`、`ApiConfig` 与 `workspace_path`；未传入路径的 `SessionManager()` 从该根级配置取得工作目录。仓库根目录 `workspace/` 已被 Git 忽略，默认测试覆盖路径加载、优先级、空值校验和 Manager 回退行为。
 - 新增最小 `MessageBus`、`ContextBuilder` 和队列式 `AgentLoop`：主循环持续消费入站队列，并为每条消息创建受追踪、可取消的处理任务；不同会话可并行处理，同一 `session_id` 从读取历史到保存结果使用锁保持顺序。每条入站消息按“系统提示词 + 非系统历史 + 当前用户消息”构建请求，交由非流式 `AgentRunner` 执行，再保存本轮新增消息并发布出站回复。系统提示词不写入 Session；仅在 `AgentRunner` 正常返回 `AgentRunResult` 后保存本轮新增消息，Provider 或 Runner 异常只发布不泄露内部细节的失败回复。新增离线 Context 与 Loop 测试。
 - `ApiConfig` 作为 `AgentConfig.api` 管理 `API_HOST`、`API_PORT` 和 `API_REQUEST_TIMEOUT_SECONDS`，默认仅监听 `127.0.0.1:8000`；`.env.example` 已同步安全示例。
@@ -32,7 +33,7 @@
 - `aiohttp` 已加入运行时依赖并同步 `uv.lock`。HTTP/CLI 离线测试覆盖直接 AgentLoop 调用、并发请求、超时取消、未处理异常、真实 AgentLoop 装配、会话 API、启动失败与 CLI 生命周期；本次改造后当前全量默认 `pytest` 的 101 项测试、Ruff 检查与格式检查均通过，`python -m src --help` 和已安装的 `robot-agent --help` 已验证。
 - 新增原生 `OllamaCompactProvider`，并通过 `PROVIDER_TYPE=ollama` 纳入统一 `AgentConfig` 和 Provider 工厂。该适配器使用官方 `ollama` SDK，沿用通用 `PROVIDER_API_BASE`、`PROVIDER_MODEL`、`PROVIDER_MAX_TOKENS`、`PROVIDER_TEMPERATURE` 与 `PROVIDER_REQUEST_TIMEOUT_SECONDS` 配置；本地 Ollama 通常不需要 `PROVIDER_API_KEY`。
 - `ToolMessage` 支持可选的单张本地 `image_path`。原生 Ollama 适配器仍会在发送请求前读取该文件，并作为工具结果图片交给 Ollama SDK。对支持图片交接的 Provider，`AgentRunner` 会在每次调用 Provider 前仅构造会话副本：初始历史中的 `ToolMessage.image_path` 会在该副本中改为英文过期提示（要求调用 `capture_camera` 获取最新图片），不会修改原始消息或 AgentRunResult；对于当前工具批次，Runner 会先连续加入全部 `ToolMessage`，再在其后为成功读取的图片加入带 `source=tool_image` 标记的临时多模态 `HumanMessage`。OpenAI-compatible 请求把该消息转换为文本和 `data:` 图片 URL；图片读取失败会写入对应 ToolMessage，保留路径并继续流程。JSONL 在保存时过滤临时图片 HumanMessage，仍保留 ToolMessage 的轻量图片路径和工具关联信息。离线测试不运行真实 Provider、Ollama、网络、GPU 或设备。
-- 本轮新增 Provider、Runner、工具结果路径传递与 JSONL 兼容测试；当前全量默认 `pytest` 为 114 项通过，`compileall` 与 Ruff 检查、格式检查均通过。
+- 本轮新增 Provider、Runner、工具结果路径传递与 JSONL 兼容测试；当前全量默认 `pytest` 为 132 项通过，`compileall` 与 Ruff 检查、格式检查均通过。
 - 新增无参数内建 `capture_camera` 工具。它通过 `ToolLoader` 在 `Application` 装配时自动注册，返回固定的本地图片路径 `./workspace/pictures/test.jpg`，以供当前 Tool → ToolMessage 图片结果链路使用；原生 Ollama Provider 直接读取该路径，OpenAI-compatible Provider 通过 AgentRunner 的临时图片消息接收内容。当前工具不读取图片、不连接机器人头部摄像头，也不执行任何硬件控制。
 
 ## 待开发功能

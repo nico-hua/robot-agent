@@ -35,6 +35,7 @@ def test_load_agent_config_converts_all_project_environment_values(tmp_path: Pat
             API_HOST=" 0.0.0.0 ",
             API_PORT="9000",
             API_REQUEST_TIMEOUT_SECONDS="2.5",
+            PROVIDER_THINK="true",
         )
     )
 
@@ -45,10 +46,17 @@ def test_load_agent_config_converts_all_project_environment_values(tmp_path: Pat
     assert config.provider.default_model == "test-model"
     assert config.provider.default_max_tokens == 2048
     assert config.provider.default_temperature == 0.25
+    assert config.provider.think is True
     assert config.provider.request_timeout_seconds == 45.0
     assert config.api.host == "0.0.0.0"
     assert config.api.port == 9000
     assert config.api.request_timeout_seconds == 2.5
+
+
+def test_load_agent_config_disables_thinking_by_default(tmp_path: Path) -> None:
+    config = load_agent_config(_agent_environment(tmp_path))
+
+    assert config.provider.think is False
 
 
 def test_load_agent_config_uses_defaults_for_blank_optional_values(tmp_path: Path) -> None:
@@ -57,6 +65,7 @@ def test_load_agent_config_uses_defaults_for_blank_optional_values(tmp_path: Pat
             tmp_path,
             PROVIDER_API_KEY="",
             PROVIDER_REQUEST_TIMEOUT_SECONDS=" ",
+            PROVIDER_THINK=" ",
             API_HOST=" ",
             API_PORT=" ",
             API_REQUEST_TIMEOUT_SECONDS=" ",
@@ -64,6 +73,7 @@ def test_load_agent_config_uses_defaults_for_blank_optional_values(tmp_path: Pat
     )
 
     assert config.provider.api_key == ""
+    assert config.provider.think is False
     assert config.provider.request_timeout_seconds == 60.0
     assert config.api.host == "127.0.0.1"
     assert config.api.port == 8000
@@ -104,6 +114,7 @@ def test_load_agent_config_uses_process_environment_over_dotenv(
                 "PROVIDER_MODEL=dotenv-model",
                 "PROVIDER_MAX_TOKENS=1024",
                 "PROVIDER_TEMPERATURE=0.7",
+                "PROVIDER_THINK=true",
                 "PROVIDER_REQUEST_TIMEOUT_SECONDS=15",
                 "API_HOST=127.0.0.1",
                 "API_PORT=8001",
@@ -117,6 +128,7 @@ def test_load_agent_config_uses_process_environment_over_dotenv(
     monkeypatch.setattr(loader, "_PROJECT_ENV_FILE", env_file)
     monkeypatch.setenv("WORKSPACE_PATH", str(process_workspace))
     monkeypatch.setenv("PROVIDER_MODEL", "process-model")
+    monkeypatch.setenv("PROVIDER_THINK", "false")
     monkeypatch.setenv("API_PORT", "9001")
 
     config = load_agent_config()
@@ -124,6 +136,7 @@ def test_load_agent_config_uses_process_environment_over_dotenv(
     assert config.workspace_path == process_workspace.resolve()
     assert config.provider.default_model == "process-model"
     assert config.provider.default_max_tokens == 1024
+    assert config.provider.think is False
     assert config.provider.request_timeout_seconds == 15.0
     assert config.api.host == "127.0.0.1"
     assert config.api.port == 9001
@@ -134,6 +147,7 @@ def test_load_agent_config_uses_process_environment_over_dotenv(
     "overrides",
     [
         {"PROVIDER_TYPE": "unsupported_compat"},
+        {"PROVIDER_THINK": "not-a-bool"},
         {"PROVIDER_REQUEST_TIMEOUT_SECONDS": "0"},
         {"API_PORT": "0"},
         {"API_PORT": "65536"},

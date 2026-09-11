@@ -29,17 +29,21 @@ class OpenAICompatProvider(LLMProvider):
         default_model: str,
         default_max_tokens: int | None = None,
         default_temperature: float | None = None,
+        default_think: bool = False,
         timeout: float = 60.0,
         *,
         client: Any | None = None,
     ) -> None:
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
             raise ValueError("OpenAI-compatible timeout must be a positive number")
+        if not isinstance(default_think, bool):
+            raise TypeError("OpenAI-compatible default_think must be a boolean")
 
         self.api_base = api_base
         self.default_model = default_model
         self.default_max_tokens = default_max_tokens
         self.default_temperature = default_temperature
+        self.default_think = default_think
         self.timeout = float(timeout)
         self._client = (
             client
@@ -65,8 +69,9 @@ class OpenAICompatProvider(LLMProvider):
         tools: Sequence[Tool] | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
+        think: bool | None = None,
     ) -> LLMResponse:
-        request = self._build_request(messages, tools, max_tokens, temperature)
+        request = self._build_request(messages, tools, max_tokens, temperature, think)
         logger.debug(
             "OpenAI-compatible completion requested (model=%s, messages=%d, tools=%d)",
             self.default_model,
@@ -90,8 +95,9 @@ class OpenAICompatProvider(LLMProvider):
         max_tokens: int | None = None,
         temperature: float | None = None,
         on_delta: Callable[[str], Awaitable[None]] | None = None,
+        think: bool | None = None,
     ) -> LLMResponse:
-        request = self._build_request(messages, tools, max_tokens, temperature)
+        request = self._build_request(messages, tools, max_tokens, temperature, think)
         request["stream"] = True
         logger.debug(
             "OpenAI-compatible streaming requested (model=%s, messages=%d, tools=%d)",
@@ -149,6 +155,7 @@ class OpenAICompatProvider(LLMProvider):
         tools: Sequence[Tool] | None,
         max_tokens: int | None,
         temperature: float | None,
+        think: bool | None,
     ) -> dict[str, Any]:
         request: dict[str, Any] = {
             "model": self.default_model,
@@ -162,7 +169,24 @@ class OpenAICompatProvider(LLMProvider):
         resolved_temperature = temperature if temperature is not None else self.default_temperature
         if resolved_temperature is not None:
             request["temperature"] = resolved_temperature
+        request["reasoning_effort"] = _reasoning_effort(_resolve_think(think, self.default_think))
         return request
+
+
+def _resolve_think(think: bool | None, default_think: bool) -> bool:
+    """Use the per-request thinking override or the configured default."""
+
+    if think is None:
+        return default_think
+    if not isinstance(think, bool):
+        raise TypeError("OpenAI-compatible think must be a boolean or None")
+    return think
+
+
+def _reasoning_effort(think: bool) -> str:
+    """Map the project boolean to OpenAI-compatible reasoning control."""
+
+    return "medium" if think else "none"
 
 
 def _messages_to_openai(messages: Sequence[BaseMessage]) -> list[dict[str, Any]]:

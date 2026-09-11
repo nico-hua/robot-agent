@@ -93,12 +93,17 @@ class _SchemaTool(Tool):
         return ToolResult(content=str(arguments))
 
 
-def _provider(client: Any) -> OllamaCompactProvider:
+def _provider(
+    client: Any,
+    *,
+    default_think: bool = False,
+) -> OllamaCompactProvider:
     return OllamaCompactProvider(
         api_base="http://127.0.0.1:11434",
         default_model="qwen3-vl:4b",
         default_max_tokens=256,
         default_temperature=0.2,
+        default_think=default_think,
         timeout=12.5,
         client=client,
     )
@@ -183,6 +188,7 @@ def test_chat_maps_tool_result_image_and_schema_to_native_ollama(tmp_path: Path)
                 },
             ],
             "stream": False,
+            "think": False,
             "tools": [_SchemaTool().to_openai_tool()],
             "options": {"num_predict": 256, "temperature": 0.2},
         }
@@ -338,3 +344,56 @@ def test_chat_preserves_cancellation() -> None:
 
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(_provider(client).chat((HumanMessage(content="hello"),)))
+
+
+@pytest.mark.parametrize(
+    ("default_think", "think", "expected_think"),
+    [
+        pytest.param(False, None, False, id="default-disabled"),
+        pytest.param(True, None, True, id="default-enabled"),
+        pytest.param(False, True, True, id="explicitly-enabled"),
+        pytest.param(True, False, False, id="explicitly-disabled"),
+    ],
+)
+def test_chat_passes_resolved_thinking_mode_to_native_ollama(
+    default_think: bool,
+    think: bool | None,
+    expected_think: bool,
+) -> None:
+    client = _RecordingAsyncClient(_chat_response())
+
+    asyncio.run(
+        _provider(client, default_think=default_think).chat(
+            (HumanMessage(content="think about this"),),
+            think=think,
+        )
+    )
+
+    assert client.calls[0]["think"] is expected_think
+
+
+@pytest.mark.parametrize(
+    ("default_think", "think", "expected_think"),
+    [
+        pytest.param(False, None, False, id="default-disabled"),
+        pytest.param(True, None, True, id="default-enabled"),
+        pytest.param(False, True, True, id="explicitly-enabled"),
+        pytest.param(True, False, False, id="explicitly-disabled"),
+    ],
+)
+def test_stream_chat_passes_resolved_thinking_mode_to_native_ollama(
+    default_think: bool,
+    think: bool | None,
+    expected_think: bool,
+) -> None:
+    client = _StreamingAsyncClient()
+
+    asyncio.run(
+        _provider(client, default_think=default_think).stream_chat(
+            (HumanMessage(content="think about this"),),
+            think=think,
+        )
+    )
+
+    assert client.calls[0]["stream"] is True
+    assert client.calls[0]["think"] is expected_think

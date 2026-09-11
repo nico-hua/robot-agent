@@ -62,12 +62,14 @@ def test_default_factory_constructs_concrete_provider(
         api_key=api_key,
         api_base=api_base,
         model="test-model",
+        think=True,
     )
 
     provider = create_default_provider_factory().create(config)
 
     assert isinstance(provider, expected_type)
     assert isinstance(provider, LLMProvider)
+    assert provider.default_think is True
     assert provider._client.options == {
         "api_key": expected_sdk_api_key,
         "base_url": api_base,
@@ -83,6 +85,7 @@ def test_default_factory_constructs_native_ollama_provider(
         type="ollama",
         api_base="http://127.0.0.1:11434",
         model="qwen3.5:4b",
+        think=True,
         request_timeout_seconds=12.5,
     )
 
@@ -90,5 +93,6 @@ def test_default_factory_constructs_native_ollama_provider(
 
     assert isinstance(provider, ollama_compact_provider.OllamaCompactProvider)
     assert isinstance(provider, LLMProvider)
+    assert provider.default_think is True
     assert provider._client.host == "http://127.0.0.1:11434"
     assert provider._client.options == {"timeout": 12.5}

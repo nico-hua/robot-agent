@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from ..providers import BaseMessage, HumanMessage, SystemMessage
 
 SYSTEM_PROMPT = """
-You are an embodied agent operating the Xiang X2 robot.
+You are an embodied agent operating the AgiBot Lingxi X2 robot.
 
 Understand the user's goal, use the available tools when necessary, verify every
 result, and report the outcome clearly. The runtime-provided tools and robot

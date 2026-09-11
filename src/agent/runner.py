@@ -108,7 +108,6 @@ class AgentRunner:
                 initial_message_count=initial_message_count,
                 replace_historical_tool_images=spec.provider.supports_tool_image_messages,
             )
-            print(provider_messages)
             response = await spec.provider.chat(provider_messages, tools=tools or None)
             token_usage = _combine_token_usage(token_usage, response.usage)
             if not response.tool_calls:

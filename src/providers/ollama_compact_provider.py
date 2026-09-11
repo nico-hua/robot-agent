@@ -33,17 +33,21 @@ class OllamaCompactProvider(LLMProvider):
         default_model: str,
         default_max_tokens: int | None = None,
         default_temperature: float | None = None,
+        default_think: bool = False,
         timeout: float = 60.0,
         *,
         client: Any | None = None,
     ) -> None:
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
             raise ValueError("Ollama timeout must be a positive number")
+        if not isinstance(default_think, bool):
+            raise TypeError("Ollama default_think must be a boolean")
 
         self.api_base = api_base
         self.default_model = default_model
         self.default_max_tokens = default_max_tokens
         self.default_temperature = default_temperature
+        self.default_think = default_think
         self.timeout = float(timeout)
         self._client = (
             client
@@ -60,6 +64,7 @@ class OllamaCompactProvider(LLMProvider):
         tools: Sequence[Tool] | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
+        think: bool | None = None,
     ) -> LLMResponse:
         """Complete one non-streaming native Ollama chat request."""
 
@@ -68,6 +73,7 @@ class OllamaCompactProvider(LLMProvider):
             tools,
             max_tokens,
             temperature,
+            think,
             stream=False,
         )
         logger.debug(
@@ -92,6 +98,7 @@ class OllamaCompactProvider(LLMProvider):
         max_tokens: int | None = None,
         temperature: float | None = None,
         on_delta: Callable[[str], Awaitable[None]] | None = None,
+        think: bool | None = None,
     ) -> LLMResponse:
         """Stream native Ollama text deltas and return the aggregated response."""
 
@@ -100,6 +107,7 @@ class OllamaCompactProvider(LLMProvider):
             tools,
             max_tokens,
             temperature,
+            think,
             stream=True,
         )
         logger.debug(
@@ -146,6 +154,7 @@ class OllamaCompactProvider(LLMProvider):
         tools: Sequence[Tool] | None,
         max_tokens: int | None,
         temperature: float | None,
+        think: bool | None,
         *,
         stream: bool,
     ) -> dict[str, Any]:
@@ -153,6 +162,7 @@ class OllamaCompactProvider(LLMProvider):
             "model": self.default_model,
             "messages": await _messages_to_ollama(messages),
             "stream": stream,
+            "think": _resolve_think(think, self.default_think),
         }
         if tools is not None:
             request["tools"] = [tool.to_openai_tool() for tool in tools]
@@ -167,6 +177,16 @@ class OllamaCompactProvider(LLMProvider):
         if options:
             request["options"] = options
         return request
+
+
+def _resolve_think(think: bool | None, default_think: bool) -> bool:
+    """Use the per-request thinking override or the configured default."""
+
+    if think is None:
+        return default_think
+    if not isinstance(think, bool):
+        raise TypeError("Ollama think must be a boolean or None")
+    return think
 
 
 async def _messages_to_ollama(messages: Sequence[BaseMessage]) -> list[dict[str, Any]]:
